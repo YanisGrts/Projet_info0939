@@ -261,9 +261,14 @@ double interpolate_data(const struct data *data, double **values, double x, doub
   else{
     j1 = j + 1;
   }
-
-  double val = GET(data, i, j);
-  return val;
+  double h00 = GET(data, i, j);
+  double h01 = GET(data, i, j1); 
+  double h10 = GET(data, i1, j);
+  double h11 = GET(data, i1, j1);
+  return (h00 * (i1 * data->dx - x) * (j1 * data->dx - y) + 
+          h01 * (i1 * data->dx - x) * (y - j * data->dx) + 
+          h10 * (x - i * data->dx) * (j1 * data->dx - y) + 
+          h11 * (x - i * data->dx) * (y - j * data->dx)) /(data->dx * data->dy);
 }
 
 int main(int argc, char **argv)
@@ -300,16 +305,24 @@ int main(int argc, char **argv)
 
   // interpolate bathymetry
   struct data h_interp;
+  struct data h_u;
+  struct data h_v;
   init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
+  init_data(&h_u, nx, ny, param.dx, param.dy, 0.);
+  init_data(&h_v, nx, ny, param.dx, param.dy, 0.);
   double **values = (double**)malloc(nx * sizeof(double*));
   for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
 
-  for(int j = 0; j < ny; j++) {
-    for(int i = 0; i < nx; i++) {
+  for(int i = 0; i < ny; i++) {
+    for(int j = 0; j < nx; j++) {
       double x = i * param.dx;
       double y = j * param.dy;
       double val = interpolate_data(&h, values, x, y);
       SET(&h_interp, i, j, val);
+      double val = interpolate_data(&h, values, x + param.dx / 2, y);
+      SET(&h_u, i, j, val);
+      double val = interpolate_data(&h, values,  x, y + param.dy / 2);
+      SET(&h_v, i, j, val); 
     }
   }
 
@@ -362,11 +375,23 @@ int main(int argc, char **argv)
     for(int i = 0; i < nx; i++) {
       for(int j = 0; j < ny ; j++) {
         // TODO: this does not evaluate h at the correct locations
-        double h_ij = GET(&h_interp, i, j);
-        double c1 = param.dt * h_ij;
+        double hui1j;
+        if(i == 0)
+          hui1j = GET(&h_u, i, j);
+        else 
+          hui1j = GET(&h_u, i + 1, j);
+        double huij = GET(&h_u, i, j);
+
+        double hvij1;
+        if(j == 0)
+          hvij1 = GET(&h_v, i, j);
+        else 
+          hvij1 = GET(&h_v, i, j);
+        double hvij = GET(&h_u, i, j + 1);
+        
         double eta_ij = GET(&eta, i, j)
-          - c1 / param.dx * (GET(&u, i + 1, j) - GET(&u, i, j))
-          - c1 / param.dy * (GET(&v, i, j + 1) - GET(&v, i, j));
+          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
         SET(&eta, i, j, eta_ij);
       }
     }
