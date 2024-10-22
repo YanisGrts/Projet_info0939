@@ -237,16 +237,31 @@ void free_data(struct data *data)
   free(data->values);
 }
 
-double interpolate_data(const struct data *data, double x, double y)
+double interpolate_data(const struct data *data, double **values, double x, double y)
 {
   // TODO: this returns the nearest neighbor, should implement actual
   // interpolation instead
   int i = (int)(x / data->dx);
   int j = (int)(y / data->dy);
+  int i1;
+  int j1;
   if(i < 0) i = 0;
-  else if(i > data->nx - 1) i = data->nx - 1;
+  if(i > data->nx - 1){ 
+    i1 = data->nx - 1;
+    i = data-> nx - 2;
+  }
+  else{
+    i1 = i + 1; 
+  }
   if(j < 0) j = 0;
-  else if(j > data->ny - 1) j = data->ny - 1;
+  if(j > data->ny - 1){ 
+    j1 = data->ny - 1;
+    j = data-> ny - 2;
+  }
+  else{
+    j1 = j + 1;
+  }
+
   double val = GET(data, i, j);
   return val;
 }
@@ -286,11 +301,14 @@ int main(int argc, char **argv)
   // interpolate bathymetry
   struct data h_interp;
   init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
+  double **values = (double**)malloc(nx * sizeof(double*));
+  for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
+
   for(int j = 0; j < ny; j++) {
     for(int i = 0; i < nx; i++) {
       double x = i * param.dx;
       double y = j * param.dy;
-      double val = interpolate_data(&h, x, y);
+      double val = interpolate_data(&h, values, x, y);
       SET(&h_interp, i, j, val);
     }
   }
