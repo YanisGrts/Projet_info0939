@@ -319,9 +319,9 @@ int main(int argc, char **argv)
       double y = j * param.dy;
       double val = interpolate_data(&h, values, x, y);
       SET(&h_interp, i, j, val);
-      double val = interpolate_data(&h, values, x + param.dx / 2, y);
+      val = interpolate_data(&h, values, x + param.dx / 2, y);
       SET(&h_u, i, j, val);
-      double val = interpolate_data(&h, values,  x, y + param.dy / 2);
+      val = interpolate_data(&h, values,  x, y + param.dy / 2);
       SET(&h_v, i, j, val); 
     }
   }
