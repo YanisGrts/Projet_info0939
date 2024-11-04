@@ -12,7 +12,13 @@
 #define GET_TIME() ((double)clock() / CLOCKS_PER_SEC) // cpu time
 #endif
 
-struct parameters {
+// h is the depth at rest
+// eta represente l'élévation de la surface
+// U = "depth-averaged velocity
+//gamma is the dissipation coefficient
+
+struct parameters 
+{
   double dx, dy, dt, max_t;
   double g, gamma;
   int source_type;
@@ -23,10 +29,11 @@ struct parameters {
   char output_v_filename[256];
 };
 
+
 struct data {
-  int nx, ny;
-  double dx, dy;
-  double *values;
+  int nx, ny; // number of nodes along x and y
+  double dx, dy; //  spatial grid step along x, y
+  double *values; //values c'est comme le board mais en une dimension pour que ca soit plus efficace 
 };
 
 #define GET(data, i, j) ((data)->values[(data)->nx * (j) + (i)])
@@ -237,42 +244,31 @@ void free_data(struct data *data)
   free(data->values);
 }
 
-double interpolate_data(const struct data *data, double **values, double x, double y)
+//interpolate data doit retourner le H
+double interpolate_data(const struct data *data, double x, double y)
 {
   // TODO: this returns the nearest neighbor, should implement actual
   // interpolation instead
-  int i = (int)(x / data->dx);
-  int j = (int)(y / data->dy);
-  int i1;
-  int j1;
-  if(i < 0) i = 0;
-  if(i > data->nx - 1){ 
-    i1 = data->nx - 1;
-    i = data-> nx - 2;
-  }
-  else{
-    i1 = i + 1; 
-  }
-  if(j < 0) j = 0;
-  if(j > data->ny - 1){ 
-    j1 = data->ny - 1;
-    j = data-> ny - 2;
-  }
-  else{
-    j1 = j + 1;
-  }
-  double h00 = GET(data, i, j);
-  double h01 = GET(data, i, j1); 
-  double h10 = GET(data, i1, j);
-  double h11 = GET(data, i1, j1);
-  return (h00 * (i1 * data->dx - x) * (j1 * data->dx - y) + 
-          h01 * (i1 * data->dx - x) * (y - j * data->dx) + 
-          h10 * (x - i * data->dx) * (j1 * data->dx - y) + 
-          h11 * (x - i * data->dx) * (y - j * data->dx)) /(data->dx * data->dy);
+
+  // int i = (int)(x / data->dx); // contient la case ou on est
+  // int j = (int)(y / data->dy);
+  // if(i < 0) i = 0;
+  // else if(i > data->nx - 1) i = data->nx - 1;
+  // if(j < 0) j = 0;
+  // else if(j > data->ny - 1) j = data->ny - 1;
+  // double val = GET(data, i, j);
+  // return val;
+
+
+  int i = (int)(x/data->dx);
+  int j = (int)(j/data->dy);
+
+  
 }
 
 int main(int argc, char **argv)
 {
+
   if(argc != 2) {
     printf("Usage: %s parameter_file\n", argv[0]);
     return 1;
@@ -305,24 +301,13 @@ int main(int argc, char **argv)
 
   // interpolate bathymetry
   struct data h_interp;
-  struct data h_u;
-  struct data h_v;
   init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
-  init_data(&h_u, nx, ny, param.dx, param.dy, 0.);
-  init_data(&h_v, nx, ny, param.dx, param.dy, 0.);
-  double **values = (double**)malloc(nx * sizeof(double*));
-  for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
-
-  for(int i = 0; i < ny; i++) {
-    for(int j = 0; j < nx; j++) {
+  for(int j = 0; j < ny; j++) {
+    for(int i = 0; i < nx; i++) {
       double x = i * param.dx;
       double y = j * param.dy;
-      double val = interpolate_data(&h, values, x, y);
+      double val = interpolate_data(&h, x, y);
       SET(&h_interp, i, j, val);
-      val = interpolate_data(&h, values, x + param.dx / 2, y);
-      SET(&h_u, i, j, val);
-      val = interpolate_data(&h, values,  x, y + param.dy / 2);
-      SET(&h_v, i, j, val); 
     }
   }
 
@@ -375,23 +360,11 @@ int main(int argc, char **argv)
     for(int i = 0; i < nx; i++) {
       for(int j = 0; j < ny ; j++) {
         // TODO: this does not evaluate h at the correct locations
-        double hui1j;
-        if(i == 0)
-          hui1j = GET(&h_u, i, j);
-        else 
-          hui1j = GET(&h_u, i + 1, j);
-        double huij = GET(&h_u, i, j);
-
-        double hvij1;
-        if(j == 0)
-          hvij1 = GET(&h_v, i, j);
-        else 
-          hvij1 = GET(&h_v, i, j);
-        double hvij = GET(&h_u, i, j + 1);
-        
+        double h_ij = GET(&h_interp, i, j);
+        double c1 = param.dt * h_ij;
         double eta_ij = GET(&eta, i, j)
-          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+          - c1 / param.dx * (GET(&u, i + 1, j) - GET(&u, i, j))
+          - c1 / param.dy * (GET(&v, i, j + 1) - GET(&v, i, j));
         SET(&eta, i, j, eta_ij);
       }
     }
