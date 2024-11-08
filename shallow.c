@@ -4,6 +4,7 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
+#include <mpi.h>
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -14,7 +15,7 @@
 
 // h is the depth at rest
 // eta represente l'élévation de la surface
-// U = "depth-averaged velocity
+// U = depth-averaged velocity
 //gamma is the dissipation coefficient
 
 struct parameters 
@@ -245,11 +246,11 @@ void free_data(struct data *data)
   free(data->values);
 }
 
-//interpolate data doit retourner le H
+//interpolate data doit retourner le H, le H est constant mais au début on doit le trouver
+//Donc au début on a la bathymetric map (data) pas précise, puis on fait un truc plus précis 
 double interpolate_data(const struct data *data, double **values, double x, double y)
 {
-  // TODO: this returns the nearest neighbor, should implement actual
-  // interpolation instead
+  // x, y représentent la position du noeud qu'on interpole
   int i = (int)(x / data->dx);
   int j = (int)(y / data->dy);
   int i1;
@@ -282,10 +283,44 @@ double interpolate_data(const struct data *data, double **values, double x, doub
 
 int main(int argc, char **argv)
 {
+  
   if(argc != 2) {
     printf("Usage: %s parameter_file\n", argv[0]);
     return 1;
   }
+
+  int world_rank, world_size;
+
+  int dims[2] = {0, 0};
+  int periods[2] = {0, 0};
+
+  int reorder = 1;
+
+  MPI_Comm cart_comm;
+
+  int cart_rank;
+  int coords[2];
+
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+  MPI_Dims_create(world_size, 2, dims);
+
+  MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &cart_comm);
+
+  MPI_Comm_rank(cart_comm, &cart_rank);
+  MPI_Cart_coords(cart_comm, cart_rank, 2, coords);
+
+
+  if (world_rank == 0)
+  {  
+    printf("Running with %d processes.\n", world_size);
+    printf("Dimensions are ( %d, %d)", dims[0], dims[1]);
+  }
+
+
+
 
   struct parameters param;
   if(read_parameters(&param, argv[1])) return 1;
@@ -294,38 +329,73 @@ int main(int argc, char **argv)
   struct data h;
   if(read_data(&h, param.input_h_filename)) return 1;
 
-  // infer size of domain from input elevation data
+  //hx, hy représente longueurs/largeurs de la grille (du problème en metre)
   double hx = h.nx * h.dx;
   double hy = h.ny * h.dy;
+
+  // le nombre de noeuds que en fonction des arguments de l'exécution
   int nx = floor(hx / param.dx);
   int ny = floor(hy / param.dy);
   if(nx <= 0) nx = 1;
   if(ny <= 0) ny = 1;
+
+  // le nombre de pas de temps
   int nt = floor(param.max_t / param.dt);
 
   printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
          hx, hy, nx, ny, nx * ny);
   printf(" - number of time steps: %d\n", nt);
 
+  //tu crées 3 nouvelles structure data
   struct data eta, u, v;
   init_data(&eta, nx, ny, param.dx, param.dx, 0.);
   init_data(&u, nx + 1, ny, param.dx, param.dy, 0.);
   init_data(&v, nx, ny + 1, param.dx, param.dy, 0.);
 
   // interpolate bathymetry
+  //les h interp c'est les h plus précis que la bathymétric map
   struct data h_interp;
+  // h_u et h_v c'est la hauteur aux endroits où on évalue la vitesse
   struct data h_u;
   struct data h_v;
+
   init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
   init_data(&h_u, nx, ny, param.dx, param.dy, 0.);
   init_data(&h_v, nx, ny, param.dx, param.dy, 0.);
   double **values = (double**)malloc(nx * sizeof(double*));
+
   for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
 
-  for(int i = 0; i < ny; i++) {
-    for(int j = 0; j < nx; j++) {
+  //calcule des dimensions adaptés aux différents process
+
+  int sizeXp, sizeYp;
+
+  //le nombre de noeuds pour un process
+  sizeXp = (int)nx/dims[0];
+  sizeYp = (int)ny/dims[1];
+
+  int startIndiceX, endIndiceX, startIndiceY, endIndiceY;
+
+  startIndiceX = coords[0] * sizeXp;
+  endIndiceX = startIndiceX + sizeXp -1;
+
+  startIndiceY = coords[1] * sizeYp;
+  endIndiceY = startIndiceY + sizeYp -1;
+
+  printf("Process = %d, startIndiceX = %d, endIndiceX = %d, startIndiceY = %d, endIndiceY = %d\n\n", world_rank, startIndiceX, endIndiceX, startIndiceY, endIndiceY);
+  if(world_rank == 0)
+    printf("sizeXp = %d, sizeYp = %d", sizeXp, sizeYp); 
+  
+
+
+  for(int i = 0; i < ny; i++) 
+  {
+    for(int j = 0; j < nx; j++) 
+    {
       double x = i * param.dx;
       double y = j * param.dy;
+
+      //ici on interpole à partir de h (donc la bathymétric map pas précise)
       double val = interpolate_data(&h, values, x, y);
       SET(&h_interp, i, j, val);
       val = interpolate_data(&h, values, x + param.dx / 2, y);
@@ -337,7 +407,9 @@ int main(int argc, char **argv)
 
   double start = GET_TIME();
 
-  for(int n = 0; n < nt; n++) {
+  //boucle temporelle
+  for(int n = 0; n < nt; n++) 
+  {
 
     if(n && (n % (nt / 10)) == 0) {
       double time_sofar = GET_TIME() - start;
