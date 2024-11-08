@@ -324,10 +324,13 @@ int main(int argc, char **argv)
 
   struct parameters param;
   if(read_parameters(&param, argv[1])) return 1;
-  print_parameters(&param);
+  if(world_rank == 0)
+    print_parameters(&param);
 
   struct data h;
+  // printf("1\n");
   if(read_data(&h, param.input_h_filename)) return 1;
+  // printf("2\n");
 
   //hx, hy représente longueurs/largeurs de la grille (du problème en metre)
   double hx = h.nx * h.dx;
@@ -382,11 +385,14 @@ int main(int argc, char **argv)
   startIndiceY = coords[1] * sizeYp;
   endIndiceY = startIndiceY + sizeYp -1;
 
-  printf("Process = %d, startIndiceX = %d, endIndiceX = %d, startIndiceY = %d, endIndiceY = %d\n\n", world_rank, startIndiceX, endIndiceX, startIndiceY, endIndiceY);
+  printf("\n\n");
+  printf("Process = %d, startIndiceX = %d, endIndiceX = %d, startIndiceY = %d, endIndiceY = %d, mapX = %d, mapY = %d\n\n", world_rank, startIndiceX, endIndiceX, startIndiceY, endIndiceY, coords[0], coords[1]);
   if(world_rank == 0)
-    printf("sizeXp = %d, sizeYp = %d", sizeXp, sizeYp); 
-  
+    printf("sizeXp = %d, sizeYp = %d\n", sizeXp, sizeYp); 
 
+
+
+  // return 0;
 
   for(int i = 0; i < ny; i++) 
   {
@@ -408,93 +414,93 @@ int main(int argc, char **argv)
   double start = GET_TIME();
 
   //boucle temporelle
-  for(int n = 0; n < nt; n++) 
-  {
+  // for(int n = 0; n < nt; n++) 
+  // {
 
-    if(n && (n % (nt / 10)) == 0) {
-      double time_sofar = GET_TIME() - start;
-      double eta = (nt - n) * time_sofar / n;
-      printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
-      fflush(stdout);
-    }
+  //   if(n && (n % (nt / 10)) == 0) {
+  //     double time_sofar = GET_TIME() - start;
+  //     double eta = (nt - n) * time_sofar / n;
+  //     printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
+  //     fflush(stdout);
+  //   }
 
-    // output solution
-    if(param.sampling_rate && !(n % param.sampling_rate)) {
-      write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-      //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-      //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
-    }
+  //   // output solution
+  //   if(param.sampling_rate && !(n % param.sampling_rate)) {
+  //     write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
+  //     //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
+  //     //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
+  //   }
 
-    // impose boundary conditions
-    double t = n * param.dt;
-    if(param.source_type == 1) {
-      // sinusoidal velocity on top boundary
-      double A = 5;
-      double f = 1. / 20.;
-      for(int i = 0; i < nx; i++) {
-        for(int j = 0; j < ny; j++) {
-          SET(&u, 0, j, 0.);
-          SET(&u, nx, j, 0.);
-          SET(&v, i, 0, 0.);
-          SET(&v, i, ny, A * sin(2 * M_PI * f * t));
-        }
-      }
-    }
-    else if(param.source_type == 2) {
-      // sinusoidal elevation in the middle of the domain
-      double A = 5;
-      double f = 1. / 20.;
-      SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
-    }
-    else {
-      // TODO: add other sources
-      printf("Error: Unknown source type %d\n", param.source_type);
-      exit(0);
-    }
+  //   // impose boundary conditions
+  //   double t = n * param.dt;
+  //   if(param.source_type == 1) {
+  //     // sinusoidal velocity on top boundary
+  //     double A = 5;
+  //     double f = 1. / 20.;
+  //     for(int i = 0; i < nx; i++) {
+  //       for(int j = 0; j < ny; j++) {
+  //         SET(&u, 0, j, 0.);
+  //         SET(&u, nx, j, 0.);
+  //         SET(&v, i, 0, 0.);
+  //         SET(&v, i, ny, A * sin(2 * M_PI * f * t));
+  //       }
+  //     }
+  //   }
+  //   else if(param.source_type == 2) {
+  //     // sinusoidal elevation in the middle of the domain
+  //     double A = 5;
+  //     double f = 1. / 20.;
+  //     SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
+  //   }
+  //   else {
+  //     // TODO: add other sources
+  //     printf("Error: Unknown source type %d\n", param.source_type);
+  //     exit(0);
+  //   }
 
-    // update eta
-    for(int i = 0; i < nx; i++) {
-      for(int j = 0; j < ny ; j++) {
-        // TODO: this does not evaluate h at the correct locations
-        double hui1j;
-        if(i == 0)
-          hui1j = GET(&h_u, i, j);
-        else 
-          hui1j = GET(&h_u, i + 1, j);
-        double huij = GET(&h_u, i, j);
+  //   // update eta
+  //   for(int i = 0; i < nx; i++) {
+  //     for(int j = 0; j < ny ; j++) {
+  //       // TODO: this does not evaluate h at the correct locations
+  //       double hui1j;
+  //       if(i == 0)
+  //         hui1j = GET(&h_u, i, j);
+  //       else 
+  //         hui1j = GET(&h_u, i + 1, j);
+  //       double huij = GET(&h_u, i, j);
 
-        double hvij1;
-        if(j == 0)
-          hvij1 = GET(&h_v, i, j);
-        else 
-          hvij1 = GET(&h_v, i, j);
-        double hvij = GET(&h_u, i, j + 1);
+  //       double hvij1;
+  //       if(j == 0)
+  //         hvij1 = GET(&h_v, i, j);
+  //       else 
+  //         hvij1 = GET(&h_v, i, j);
+  //       double hvij = GET(&h_u, i, j + 1);
         
-        double eta_ij = GET(&eta, i, j)
-          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
-        SET(&eta, i, j, eta_ij);
-      }
-    }
+  //       double eta_ij = GET(&eta, i, j)
+  //         - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+  //         - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+  //       SET(&eta, i, j, eta_ij);
+  //     }
+  //   }
 
-    // update u and v
-    for(int i = 0; i < nx; i++) {
-      for(int j = 0; j < ny; j++) {
-        double c1 = param.dt * param.g;
-        double c2 = param.dt * param.gamma;
-        double eta_ij = GET(&eta, i, j);
-        double eta_imj = GET(&eta, (i == 0) ? 0 : i - 1, j);
-        double eta_ijm = GET(&eta, i, (j == 0) ? 0 : j - 1);
-        double u_ij = (1. - c2) * GET(&u, i, j)
-          - c1 / param.dx * (eta_ij - eta_imj);
-        double v_ij = (1. - c2) * GET(&v, i, j)
-          - c1 / param.dy * (eta_ij - eta_ijm);
-        SET(&u, i, j, u_ij);
-        SET(&v, i, j, v_ij);
-      }
-    }
+  //   // update u and v
+  //   for(int i = 0; i < nx; i++) {
+  //     for(int j = 0; j < ny; j++) {
+  //       double c1 = param.dt * param.g;
+  //       double c2 = param.dt * param.gamma;
+  //       double eta_ij = GET(&eta, i, j);
+  //       double eta_imj = GET(&eta, (i == 0) ? 0 : i - 1, j);
+  //       double eta_ijm = GET(&eta, i, (j == 0) ? 0 : j - 1);
+  //       double u_ij = (1. - c2) * GET(&u, i, j)
+  //         - c1 / param.dx * (eta_ij - eta_imj);
+  //       double v_ij = (1. - c2) * GET(&v, i, j)
+  //         - c1 / param.dy * (eta_ij - eta_ijm);
+  //       SET(&u, i, j, u_ij);
+  //       SET(&v, i, j, v_ij);
+  //     }
+  //   }
 
-  }
+  // }
 
   write_manifest_vtk("water elevation", param.output_eta_filename,
                      param.dt, nt, param.sampling_rate);
