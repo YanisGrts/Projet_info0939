@@ -12,7 +12,13 @@
 #define GET_TIME() ((double)clock() / CLOCKS_PER_SEC) // cpu time
 #endif
 
-struct parameters {
+// h is the depth at rest
+// eta represente l'élévation de la surface
+// U = "depth-averaged velocity
+//gamma is the dissipation coefficient
+
+struct parameters 
+{
   double dx, dy, dt, max_t;
   double g, gamma;
   int source_type;
@@ -23,11 +29,13 @@ struct parameters {
   char output_v_filename[256];
 };
 
+
 struct data {
-  int nx, ny;
-  double dx, dy;
-  double *values;
+  int nx, ny; // number of nodes along x and y
+  double dx, dy; //  spatial grid step along x, y
+  double *values; //values c'est comme le board mais en une dimension pour que ca soit plus efficace 
 };
+
 
 #define GET(data, i, j) ((data)->values[(data)->nx * (j) + (i)])
 #define SET(data, i, j, val) ((data)->values[(data)->nx * (j) + (i)] = (val))
@@ -237,6 +245,7 @@ void free_data(struct data *data)
   free(data->values);
 }
 
+//interpolate data doit retourner le H
 double interpolate_data(const struct data *data, double **values, double x, double y)
 {
   // TODO: this returns the nearest neighbor, should implement actual
@@ -319,9 +328,9 @@ int main(int argc, char **argv)
       double y = j * param.dy;
       double val = interpolate_data(&h, values, x, y);
       SET(&h_interp, i, j, val);
-      double val = interpolate_data(&h, values, x + param.dx / 2, y);
+      val = interpolate_data(&h, values, x + param.dx / 2, y);
       SET(&h_u, i, j, val);
-      double val = interpolate_data(&h, values,  x, y + param.dy / 2);
+      val = interpolate_data(&h, values,  x, y + param.dy / 2);
       SET(&h_v, i, j, val); 
     }
   }
