@@ -36,6 +36,7 @@ struct data {
   double *values; //values c'est comme le board mais en une dimension pour que ca soit plus efficace 
 };
 
+
 #define GET(data, i, j) ((data)->values[(data)->nx * (j) + (i)])
 #define SET(data, i, j, val) ((data)->values[(data)->nx * (j) + (i)] = (val))
 
@@ -245,30 +246,42 @@ void free_data(struct data *data)
 }
 
 //interpolate data doit retourner le H
-double interpolate_data(const struct data *data, double x, double y)
+double interpolate_data(const struct data *data, double **values, double x, double y)
 {
   // TODO: this returns the nearest neighbor, should implement actual
   // interpolation instead
-
-  // int i = (int)(x / data->dx); // contient la case ou on est
-  // int j = (int)(y / data->dy);
-  // if(i < 0) i = 0;
-  // else if(i > data->nx - 1) i = data->nx - 1;
-  // if(j < 0) j = 0;
-  // else if(j > data->ny - 1) j = data->ny - 1;
-  // double val = GET(data, i, j);
-  // return val;
-
-
-  int i = (int)(x/data->dx);
-  int j = (int)(j/data->dy);
-
-  
+  int i = (int)(x / data->dx);
+  int j = (int)(y / data->dy);
+  int i1;
+  int j1;
+  if(i < 0) i = 0;
+  if(i > data->nx - 1){ 
+    i1 = data->nx - 1;
+    i = data-> nx - 2;
+  }
+  else{
+    i1 = i + 1; 
+  }
+  if(j < 0) j = 0;
+  if(j > data->ny - 1){ 
+    j1 = data->ny - 1;
+    j = data-> ny - 2;
+  }
+  else{
+    j1 = j + 1;
+  }
+  double h00 = GET(data, i, j);
+  double h01 = GET(data, i, j1); 
+  double h10 = GET(data, i1, j);
+  double h11 = GET(data, i1, j1);
+  return (h00 * (i1 * data->dx - x) * (j1 * data->dx - y) + 
+          h01 * (i1 * data->dx - x) * (y - j * data->dx) + 
+          h10 * (x - i * data->dx) * (j1 * data->dx - y) + 
+          h11 * (x - i * data->dx) * (y - j * data->dx)) /(data->dx * data->dy);
 }
 
 int main(int argc, char **argv)
 {
-
   if(argc != 2) {
     printf("Usage: %s parameter_file\n", argv[0]);
     return 1;
@@ -286,6 +299,7 @@ int main(int argc, char **argv)
   double hy = h.ny * h.dy;
   int nx = floor(hx / param.dx);
   int ny = floor(hy / param.dy);
+  printf("nx : %d, ny: %d\n", nx, ny);
   if(nx <= 0) nx = 1;
   if(ny <= 0) ny = 1;
   int nt = floor(param.max_t / param.dt);
@@ -301,16 +315,71 @@ int main(int argc, char **argv)
 
   // interpolate bathymetry
   struct data h_interp;
+  struct data h_u;
+  struct data h_v;
   init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
-  for(int j = 0; j < ny; j++) {
-    for(int i = 0; i < nx; i++) {
+  init_data(&h_u, nx + 1, ny, param.dx, param.dy, 0.);
+  init_data(&h_v, nx, ny + 1, param.dx, param.dy, 0.);
+  double **values = (double**)malloc(nx * sizeof(double*));
+  for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
+
+  int world_size;
+  int rank, cart_rank;
+
+  int dims[2] = {0, 0};
+  int periods[2] ={0, 0};
+  int reorder = 0;
+
+  int coords[2];
+
+  int neighbors[4];
+
+  MPI_Comm cart_comm;
+
+  MPI_Init(&argc,&argv);
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  MPI_Dims_create(world_size, 2, dims);
+
+  MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 0, &cart_comm);
+  MPI_Comm_rank(cart_comm, &cart_rank);
+
+  MPI_Cart_coords(cart_comm, cart_rank, 2, coords);
+
+  MPI_Cart_shift(cart_comm, 0, 1, 
+                  &neighbors[ UP], &neighbors[DOWN]);
+
+  MPI_Cart_shift(cart_comm, 1, 1, 
+                  &neighbors[LEFT], &neighbors[RIGHT]);
+
+  printf("Rank = %4d - Coords = (%3d, %3d) - Neighbors (up, down, left, right) = (%3d, %3d, %3d, %3d)\n",
+            rank, coords[0], coords[1], 
+            neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT]);
+
+  int px, py, startpx, startpy, endpx, endpy; 
+  px = (int) nx / dims[0];
+  py = (int) ny / dims[1];
+  startpx = coords[0] * px;
+  startpy = coords[1] * py;
+  endpx = coords[0] == dims[0] - 1 ? nx - 1: (coords[0] + 1) * px - 1;
+  endpy = coords[1] == dims[1] - 1 ? ny - 1: (coords[1] + 1) * py - 1;
+
+  printf("Process %d out of %d, position : %d, %d, interval : [%d, %d]*[%d, %d]\n", rank, world_size, coords[0], coords[1], startpx, endpx, startpy, endpy);
+
+  for(int i = startpx; i <= endpx; i++) {
+    for(int j = startpy; j < endpy; j++) {
       double x = i * param.dx;
       double y = j * param.dy;
-      double val = interpolate_data(&h, x, y);
+      double val = interpolate_data(&h, values, x, y);
       SET(&h_interp, i, j, val);
+      val = interpolate_data(&h, values, x + param.dx / 2, y);
+      SET(&h_u, i, j, val);
+      val = interpolate_data(&h, values,  x, y + param.dy / 2);
+      SET(&h_v, i, j, val); 
     }
   }
-
+  MPI_Finalize();
   double start = GET_TIME();
 
   for(int n = 0; n < nt; n++) {
@@ -360,11 +429,23 @@ int main(int argc, char **argv)
     for(int i = 0; i < nx; i++) {
       for(int j = 0; j < ny ; j++) {
         // TODO: this does not evaluate h at the correct locations
-        double h_ij = GET(&h_interp, i, j);
-        double c1 = param.dt * h_ij;
+        double hui1j;
+        if(i == 0)
+          hui1j = GET(&h_u, i, j);
+        else 
+          hui1j = GET(&h_u, i + 1, j);
+        double huij = GET(&h_u, i, j);
+
+        double hvij1;
+        if(j == 0)
+          hvij1 = GET(&h_v, i, j);
+        else 
+          hvij1 = GET(&h_v, i, j);
+        double hvij = GET(&h_u, i, j + 1);
+        
         double eta_ij = GET(&eta, i, j)
-          - c1 / param.dx * (GET(&u, i + 1, j) - GET(&u, i, j))
-          - c1 / param.dy * (GET(&v, i, j + 1) - GET(&v, i, j));
+          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
         SET(&eta, i, j, eta_ij);
       }
     }
