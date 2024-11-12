@@ -37,6 +37,14 @@ struct data {
   double *values; //values c'est comme le board mais en une dimension pour que ca soit plus efficace 
 };
 
+typedef enum neighbor 
+{
+  UP    = 0,
+  DOWN  = 1,
+  LEFT  = 2,
+  RIGHT = 3
+
+} neighbor_t;
 
 #define GET(data, i, j) ((data)->values[(data)->nx * (j) + (i)])
 #define SET(data, i, j, val) ((data)->values[(data)->nx * (j) + (i)] = (val))
@@ -248,7 +256,7 @@ void free_data(struct data *data)
 
 //interpolate data doit retourner le H, le H est constant mais au début on doit le trouver
 //Donc au début on a la bathymetric map (data) pas précise, puis on fait un truc plus précis 
-double interpolate_data(const struct data *data, double **values, double x, double y)
+double interpolate_data(const struct data *data, double x, double y)
 {
   // x, y représentent la position du noeud qu'on interpole
   int i = (int)(x / data->dx);
@@ -289,85 +297,7 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  int world_rank, world_size;
-
-  int dims[2] = {0, 0};
-  int periods[2] = {0, 0};
-
-  int reorder = 1;
-
-  MPI_Comm cart_comm;
-
-  int cart_rank;
-  int coords[2];
-
-  MPI_Init(&argc, &argv);
-  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-
-  MPI_Dims_create(world_size, 2, dims);
-
-  MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &cart_comm);
-
-  MPI_Comm_rank(cart_comm, &cart_rank);
-  MPI_Cart_coords(cart_comm, cart_rank, 2, coords);
-
-
-  if (world_rank == 0)
-  {  
-    printf("Running with %d processes.\n", world_size);
-    printf("Dimensions are ( %d, %d)", dims[0], dims[1]);
-  }
-
-
-
-
-  struct parameters param;
-  if(read_parameters(&param, argv[1])) return 1;
-  if(world_rank == 0)
-    print_parameters(&param);
-
-  struct data h;
-  // printf("1\n");
-  if(read_data(&h, param.input_h_filename)) return 1;
-  // printf("2\n");
-
-  //hx, hy représente longueurs/largeurs de la grille (du problème en metre)
-  double hx = h.nx * h.dx;
-  double hy = h.ny * h.dy;
-
-  // le nombre de noeuds que en fonction des arguments de l'exécution
-  int nx = floor(hx / param.dx);
-  int ny = floor(hy / param.dy);
-  printf("nx : %d, ny: %d\n", nx, ny);
-  if(nx <= 0) nx = 1;
-  if(ny <= 0) ny = 1;
-
-  // le nombre de pas de temps
-  int nt = floor(param.max_t / param.dt);
-
-  printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
-         hx, hy, nx, ny, nx * ny);
-  printf(" - number of time steps: %d\n", nt);
-
-  //tu crées 3 nouvelles structure data
-  struct data eta, u, v;
-  init_data(&eta, nx, ny, param.dx, param.dx, 0.);
-  init_data(&u, nx + 1, ny, param.dx, param.dy, 0.);
-  init_data(&v, nx, ny + 1, param.dx, param.dy, 0.);
-
-  // interpolate bathymetry
-  //les h interp c'est les h plus précis que la bathymétric map
-  struct data h_interp;
-  // h_u et h_v c'est la hauteur aux endroits où on évalue la vitesse
-  struct data h_u;
-  struct data h_v;
-  init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
-  init_data(&h_u, nx + 1, ny, param.dx, param.dy, 0.);
-  init_data(&h_v, nx, ny + 1, param.dx, param.dy, 0.);
-  double **values = (double**)malloc(nx * sizeof(double*));
-  for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
-  //calcule des dimensions adaptés aux différents process
+   //calcule des dimensions adaptés aux différents process
 
   int world_size;
   int rank, cart_rank;
@@ -394,7 +324,7 @@ int main(int argc, char **argv)
   MPI_Cart_coords(cart_comm, cart_rank, 2, coords);
 
   MPI_Cart_shift(cart_comm, 0, 1, 
-                  &neighbors[ UP], &neighbors[DOWN]);
+                  &neighbors[UP], &neighbors[DOWN]);
 
   MPI_Cart_shift(cart_comm, 1, 1, 
                   &neighbors[LEFT], &neighbors[RIGHT]);
@@ -403,6 +333,41 @@ int main(int argc, char **argv)
             rank, coords[0], coords[1], 
             neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT]);
 
+
+
+
+ 
+
+  struct parameters param;
+  if(read_parameters(&param, argv[1])) return 1;
+  
+
+  struct data h;
+  // printf("1\n");
+  if(read_data(&h, param.input_h_filename)) return 1;
+  // printf("2\n");
+
+  //hx, hy représente longueurs/largeurs de la grille (du problème en metre)
+  double hx = h.nx * h.dx;
+  double hy = h.ny * h.dy;
+
+  // le nombre de noeuds que en fonction des arguments de l'exécution
+  int nx = floor(hx / param.dx);
+  int ny = floor(hy / param.dy);
+  printf("nx : %d, ny: %d\n", nx, ny);
+  if(nx <= 0) nx = 1;
+  if(ny <= 0) ny = 1;
+
+  // le nombre de pas de temps
+  int nt = floor(param.max_t / param.dt);
+
+  printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
+         hx, hy, nx, ny, nx * ny);
+  printf(" - number of time steps: %d\n", nt);
+
+
+  // px = taille selon x du process
+
   int px, py, startpx, startpy, endpx, endpy; 
   px = (int) nx / dims[0];
   py = (int) ny / dims[1];
@@ -410,30 +375,53 @@ int main(int argc, char **argv)
   startpy = coords[1] * py;
   endpx = coords[0] == dims[0] - 1 ? nx - 1: (coords[0] + 1) * px - 1;
   endpy = coords[1] == dims[1] - 1 ? ny - 1: (coords[1] + 1) * py - 1;
-
+  px = endpx - startpx;
+  py = endpy - startpy;
   printf("Process %d out of %d, position : %d, %d, interval : [%d, %d]*[%d, %d]\n", rank, world_size, coords[0], coords[1], startpx, endpx, startpy, endpy);
+  //tu crées 3 nouvelles structure data
+  struct data eta, u, v;
+  init_data(&eta, px, py, param.dx, param.dx, 0.);
+  init_data(&u, px + 1, py, param.dx, param.dy, 0.);
+  init_data(&v, px, py + 1, param.dx, param.dy, 0.);
 
-  for(int i = startpx; i <= endpx; i++) {
-    for(int j = startpy; j < endpy; j++) {
+  // interpolate bathymetry
+  //les h interp c'est les h plus précis que la bathymétric map
+  struct data h_interp;
+  // h_u et h_v c'est la hauteur aux endroits où on évalue la vitesse
+  struct data h_u;
+  struct data h_v;
+  init_data(&h_interp, px, py, param.dx, param.dy, 0.);
+  init_data(&h_u, px + 1, py, param.dx, param.dy, 0.);
+  init_data(&h_v, px, py + 1, param.dx, param.dy, 0.);
+
+
+ 
+  // fprintf(stderr, "1\n");
+
+  double start = GET_TIME();
+  for(int i = 0; i <= px; i++) {
+    for(int j = 0; j < py; j++) {
       double x = i * param.dx;
       double y = j * param.dy;
       //ici on interpole à partir de h (donc la bathymétric map pas précise)
-      double val = interpolate_data(&h, values, x, y);
+      double val = interpolate_data(&h, startpx + x, startpy + y);
       SET(&h_interp, i, j, val);
-      val = interpolate_data(&h, values, x + param.dx / 2, y);
+      val = interpolate_data(&h, startpx + x + param.dx / 2, startpy + y);
       SET(&h_u, i, j, val);
-      val = interpolate_data(&h, values,  x, y + param.dy / 2);
+      val = interpolate_data(&h, startpx + x, startpy + y + param.dy / 2);
       SET(&h_v, i, j, val); 
     }
   }
-  MPI_Finalize();
-  double start = GET_TIME();
+  // fprintf(stderr, "2\n");
+  
+  
 
   //boucle temporelle
   for(int n = 0; n < nt; n++) 
   {
 
-    if(n && (n % (nt / 10)) == 0) {
+    if(n && (n % (nt / 10)) == 0) 
+    {
       double time_sofar = GET_TIME() - start;
       double eta = (nt - n) * time_sofar / n;
       printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
@@ -453,30 +441,36 @@ int main(int argc, char **argv)
       // sinusoidal velocity on top boundary
       double A = 5;
       double f = 1. / 20.;
-      for(int i = 0; i < nx; i++) {
-        for(int j = 0; j < ny; j++) {
+      for(int i = 0; i < px; i++) 
+      {
+        for(int j = 0; j < py; j++) 
+        {
           SET(&u, 0, j, 0.);
-          SET(&u, nx, j, 0.);
+          SET(&u, px, j, 0.);
           SET(&v, i, 0, 0.);
-          SET(&v, i, ny, A * sin(2 * M_PI * f * t));
+          SET(&v, i, py, A * sin(2 * M_PI * f * t));
         }
       }
     }
-    else if(param.source_type == 2) {
+    else if(param.source_type == 2) 
+    {
       // sinusoidal elevation in the middle of the domain
       double A = 5;
       double f = 1. / 20.;
-      SET(&eta, nx / 2, ny / 2, A * sin(2 * M_PI * f * t));
+      SET(&eta, px / 2, py / 2, A * sin(2 * M_PI * f * t));
     }
-    else {
+    else 
+    {
       // TODO: add other sources
       printf("Error: Unknown source type %d\n", param.source_type);
       exit(0);
     }
 
     // update eta
-    for(int i = 0; i < nx; i++) {
-      for(int j = 0; j < ny ; j++) {
+    for(int i = 0; i < px; i++) 
+    {
+      for(int j = 0; j < py ; j++) 
+      {
         // TODO: this does not evaluate h at the correct locations
         double hui1j;
         if(i == 0)
@@ -500,8 +494,10 @@ int main(int argc, char **argv)
     }
 
     // update u and v
-    for(int i = 0; i < nx; i++) {
-      for(int j = 0; j < ny; j++) {
+    for(int i = 0; i < nx; i++) 
+    {
+      for(int j = 0; j < ny; j++) 
+      {
         double c1 = param.dt * param.g;
         double c2 = param.dt * param.gamma;
         double eta_ij = GET(&eta, i, j);
@@ -517,6 +513,8 @@ int main(int argc, char **argv)
     }
 
   }
+
+  MPI_Finalize();
 
   write_manifest_vtk("water elevation", param.output_eta_filename,
                      param.dt, nt, param.sampling_rate);
