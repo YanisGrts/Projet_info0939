@@ -339,6 +339,7 @@ int main(int argc, char **argv)
   // le nombre de noeuds que en fonction des arguments de l'exécution
   int nx = floor(hx / param.dx);
   int ny = floor(hy / param.dy);
+  printf("nx : %d, ny: %d\n", nx, ny);
   if(nx <= 0) nx = 1;
   if(ny <= 0) ny = 1;
 
@@ -361,45 +362,61 @@ int main(int argc, char **argv)
   // h_u et h_v c'est la hauteur aux endroits où on évalue la vitesse
   struct data h_u;
   struct data h_v;
-
   init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
-  init_data(&h_u, nx, ny, param.dx, param.dy, 0.);
-  init_data(&h_v, nx, ny, param.dx, param.dy, 0.);
+  init_data(&h_u, nx + 1, ny, param.dx, param.dy, 0.);
+  init_data(&h_v, nx, ny + 1, param.dx, param.dy, 0.);
   double **values = (double**)malloc(nx * sizeof(double*));
-
   for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
-
   //calcule des dimensions adaptés aux différents process
 
-  int sizeXp, sizeYp;
+  int world_size;
+  int rank, cart_rank;
 
-  //le nombre de noeuds pour un process
-  sizeXp = (int)nx/dims[0];
-  sizeYp = (int)ny/dims[1];
+  int dims[2] = {0, 0};
+  int periods[2] ={0, 0};
+  int reorder = 0;
 
-  int startIndiceX, endIndiceX, startIndiceY, endIndiceY;
+  int coords[2];
 
-  startIndiceX = coords[0] * sizeXp;
-  endIndiceX = startIndiceX + sizeXp -1;
+  int neighbors[4];
 
-  startIndiceY = coords[1] * sizeYp;
-  endIndiceY = startIndiceY + sizeYp -1;
+  MPI_Comm cart_comm;
 
-  printf("\n\n");
-  printf("Process = %d, startIndiceX = %d, endIndiceX = %d, startIndiceY = %d, endIndiceY = %d, mapX = %d, mapY = %d\n\n", world_rank, startIndiceX, endIndiceX, startIndiceY, endIndiceY, coords[0], coords[1]);
-  if(world_rank == 0)
-    printf("sizeXp = %d, sizeYp = %d\n", sizeXp, sizeYp); 
+  MPI_Init(&argc,&argv);
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+  MPI_Dims_create(world_size, 2, dims);
 
+  MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, 0, &cart_comm);
+  MPI_Comm_rank(cart_comm, &cart_rank);
 
+  MPI_Cart_coords(cart_comm, cart_rank, 2, coords);
 
-  for(int i = 0; i < ny; i++) 
-  {
-    for(int j = 0; j < nx; j++) 
-    {
+  MPI_Cart_shift(cart_comm, 0, 1, 
+                  &neighbors[ UP], &neighbors[DOWN]);
+
+  MPI_Cart_shift(cart_comm, 1, 1, 
+                  &neighbors[LEFT], &neighbors[RIGHT]);
+
+  printf("Rank = %4d - Coords = (%3d, %3d) - Neighbors (up, down, left, right) = (%3d, %3d, %3d, %3d)\n",
+            rank, coords[0], coords[1], 
+            neighbors[UP], neighbors[DOWN], neighbors[LEFT], neighbors[RIGHT]);
+
+  int px, py, startpx, startpy, endpx, endpy; 
+  px = (int) nx / dims[0];
+  py = (int) ny / dims[1];
+  startpx = coords[0] * px;
+  startpy = coords[1] * py;
+  endpx = coords[0] == dims[0] - 1 ? nx - 1: (coords[0] + 1) * px - 1;
+  endpy = coords[1] == dims[1] - 1 ? ny - 1: (coords[1] + 1) * py - 1;
+
+  printf("Process %d out of %d, position : %d, %d, interval : [%d, %d]*[%d, %d]\n", rank, world_size, coords[0], coords[1], startpx, endpx, startpy, endpy);
+
+  for(int i = startpx; i <= endpx; i++) {
+    for(int j = startpy; j < endpy; j++) {
       double x = i * param.dx;
       double y = j * param.dy;
-
       //ici on interpole à partir de h (donc la bathymétric map pas précise)
       double val = interpolate_data(&h, values, x, y);
       SET(&h_interp, i, j, val);
@@ -409,7 +426,7 @@ int main(int argc, char **argv)
       SET(&h_v, i, j, val); 
     }
   }
-
+  MPI_Finalize();
   double start = GET_TIME();
 
   //boucle temporelle
