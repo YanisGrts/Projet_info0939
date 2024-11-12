@@ -307,22 +307,7 @@ int main(int argc, char **argv)
   printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
          hx, hy, nx, ny, nx * ny);
   printf(" - number of time steps: %d\n", nt);
-
-  struct data eta, u, v;
-  init_data(&eta, nx, ny, param.dx, param.dx, 0.);
-  init_data(&u, nx + 1, ny, param.dx, param.dy, 0.);
-  init_data(&v, nx, ny + 1, param.dx, param.dy, 0.);
-
-  // interpolate bathymetry
-  struct data h_interp;
-  struct data h_u;
-  struct data h_v;
-  init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
-  init_data(&h_u, nx + 1, ny, param.dx, param.dy, 0.);
-  init_data(&h_v, nx, ny + 1, param.dx, param.dy, 0.);
-  double **values = (double**)malloc(nx * sizeof(double*));
-  for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
-
+  //Setting up the processes
   int world_size;
   int rank, cart_rank;
 
@@ -366,6 +351,21 @@ int main(int argc, char **argv)
   endpy = coords[1] == dims[1] - 1 ? ny - 1: (coords[1] + 1) * py - 1;
 
   printf("Process %d out of %d, position : %d, %d, interval : [%d, %d]*[%d, %d]\n", rank, world_size, coords[0], coords[1], startpx, endpx, startpy, endpy);
+
+  struct data eta, u, v;
+  init_data(&eta, nx, ny, param.dx, param.dx, 0.);
+  init_data(&u, nx + 1, ny, param.dx, param.dy, 0.);
+  init_data(&v, nx, ny + 1, param.dx, param.dy, 0.);
+
+  // interpolate bathymetry
+  struct data h_interp;
+  struct data h_u;
+  struct data h_v;
+  init_data(&h_interp, nx, ny, param.dx, param.dy, 0.);
+  init_data(&h_u, nx + 1, ny, param.dx, param.dy, 0.);
+  init_data(&h_v, nx, ny + 1, param.dx, param.dy, 0.);
+  double **values = (double**)malloc(nx * sizeof(double*));
+  for(int i = 0; i < h.nx; i++) values[i] = h.values + i * ny;
 
   for(int i = startpx; i <= endpx; i++) {
     for(int j = startpy; j < endpy; j++) {
