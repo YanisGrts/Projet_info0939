@@ -373,10 +373,10 @@ int main(int argc, char **argv)
   py = (int) ny / dims[1];
   startpx = coords[0] * px;
   startpy = coords[1] * py;
-  endpx = coords[0] == dims[0] - 1 ? nx - 1: (coords[0] + 1) * px - 1;
-  endpy = coords[1] == dims[1] - 1 ? ny - 1: (coords[1] + 1) * py - 1;
-  px = endpx - startpx;
-  py = endpy - startpy;
+  endpx = coords[0] == dims[0] - 1 ? nx - 1: startpx + px - 1;
+  endpy = coords[1] == dims[1] - 1 ? ny - 1: startpy + py - 1;
+  px = endpx - startpx + 1;
+  py = endpy - startpy + 1;
   printf("Process %d out of %d, position : %d, %d, interval : [%d, %d]*[%d, %d]\n", rank, world_size, coords[0], coords[1], startpx, endpx, startpy, endpy);
   //tu crées 3 nouvelles structure data
   struct data eta, u, v;
