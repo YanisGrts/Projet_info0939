@@ -378,8 +378,8 @@ int main(int argc, char **argv)
   //tu crées 3 nouvelles structure data
   struct data eta, u, v;
   init_data(&eta, px, py, param.dx, param.dx, 0.);
-  init_data(&u, px + 1, py, param.dx, param.dy, 0.);
-  init_data(&v, px, py + 1, param.dx, param.dy, 0.);
+  init_data(&u, coords[0] == 0 ? px + 1 : px, py, param.dx, param.dy, 0.);
+  init_data(&v, px, coords[1] == 0 ? py + 1 : py, param.dx, param.dy, 0.);
 
   // interpolate bathymetry
   //les h interp c'est les h plus précis que la bathymétric map
@@ -388,8 +388,8 @@ int main(int argc, char **argv)
   struct data h_u;
   struct data h_v;
   init_data(&h_interp, px, py, param.dx, param.dy, 0.);
-  init_data(&h_u, px + 1, py, param.dx, param.dy, 0.);
-  init_data(&h_v, px, py + 1, param.dx, param.dy, 0.);
+  init_data(&h_u, coords[0] == 0 ? px + 1 : px, py, param.dx, param.dy, 0.);
+  init_data(&h_v, px, coords[1] == 0 ? py + 1 : py, param.dx, param.dy, 0.);
 
 
  
@@ -397,16 +397,24 @@ int main(int argc, char **argv)
 
   double start = GET_TIME();
   for(int i = 0; i <= px; i++) {
-    for(int j = 0; j < py; j++) {
+    for(int j = 0; j <= py; j++) {
       double x = i * param.dx;
       double y = j * param.dy;
       //ici on interpole à partir de h (donc la bathymétric map pas précise)
-      double val = interpolate_data(&h, startpx + x, startpy + y);
-      SET(&h_interp, i, j, val);
-      val = interpolate_data(&h, startpx + x + param.dx / 2, startpy + y);
-      SET(&h_u, i, j, val);
-      val = interpolate_data(&h, startpx + x, startpy + y + param.dy / 2);
-      SET(&h_v, i, j, val); 
+      if(i != px && j != py){
+        double val = interpolate_data(&h, startpx + x, startpy + y);
+        SET(&h_interp, i, j, val);
+      }
+      //Check the if conditions
+      if(i != px && coords[1] == 0){
+        val = interpolate_data(&h, startpx + x, startpy + y + param.dy / 2);
+        SET(&h_v, i, j, val);
+      }
+      if(j != py && coords[0] == 0){
+        val = interpolate_data(&h, startpx + x + param.dx / 2, startpy + y);
+        SET(&h_u, i, j, val);
+      }
+      
     }
   }
   // fprintf(stderr, "2\n");
@@ -497,10 +505,12 @@ int main(int argc, char **argv)
     {
       for(int j = 1; j < py; j++) 
       {
-        double hui1j = GET(&h_u, i + 1, j);
-        double huij = GET(&h_u, i, j);
-        double hvij1 = GET(&h_v, i, j + 1);
-        double hvij = GET(&h_u, i, j);
+        //If we are in one border, there is one more 
+        double hui1j = coords[0] == 0 ? GET(&h_u, i + 1, j)  : GET(&h_u, i, j);
+        double huij = coords[0] == 0 ? GET(&h_u, i, j)  : GET(&h_u, i-1, j);
+        double hvij1 = coords[1] == 0 ? GET(&h_v, i, j - 1)  : GET(&h_v, i, j);
+        double hvij = coords[1] == 0 ? GET(&h_v, i, j)  : GET(&h_v, i, j-1);
+        
         
         double eta_ij = GET(&eta, i, j)
           - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
@@ -509,9 +519,32 @@ int main(int argc, char **argv)
       }
     }
     // Verifier que tout a bien été reçu
-    for(int i = 0; i < px; i++){
 
+    for(int i = 0; i < px; i++){
+      double hui1j = i == 0 && coords[0] == 0 ? GET(&h_u, 0, 0) : GET(&h_u, );//REFLECHIR
+      double huij = coords[0] == 0 ? GET(&h_u, i, 0) : left_col_hu[i];
+      double hvij1 = coords[1] == 0 ? GET(&h_v, i, 1) : GET(&h_v, i, 0);
+      double hvij = coords[1] == 0 ? GET(&h_u, i, 0) : up_col_hv[0];
+      
+      double eta_ij = GET(&eta, i, 0)
+        - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+        - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+      SET(&eta, i, 0, eta_ij);
     }
+    if(coords[1] != 0){
+      for(int i = 0; i < px; i++){
+        double hui1j = GET(&h_u, 0, i);
+        double huij = i == 0 ? left_col_hu[0] : GET(&h_u, i, j);
+        double hvij1 = GET(&h_v, 0, i + 1);
+        double hvij = up_col_hv[0]
+        
+        double eta_ij = GET(&eta, i, 0)
+          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+        SET(&eta, 0, i, eta_ij);
+      }
+    }
+
 
 
 
