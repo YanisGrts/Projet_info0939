@@ -416,7 +416,7 @@ int main(int argc, char **argv)
 
     double* left_col_hu; 
     MPI_Request *request1;
-    MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbors[LEFT], 99, cart_comm, request1);
+    MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbor[LEFT], 99, cart_comm, request1);
   }
   if(coords[0] != dims[0] - 1)
   {
@@ -426,11 +426,11 @@ int main(int argc, char **argv)
 
     for(int i = 0; i < py; i++)
     {
-      right_col_hu[i] = GET(&h_u, i, px -1);
+      right_col_hu[i] = GET(h_u, i, px -1);
     }
 
     MPI_Request *request2;
-    MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbors[RIGHT], 99, cart_comm, request2);
+    MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbor[RIGHT], 99, cart_comm, request2);
   }
   if(coords[1] != 0)
   {
@@ -438,7 +438,7 @@ int main(int argc, char **argv)
   
     double* up_row_hv; 
     MPI_Request *request3;
-    MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbors[UP], 89, cart_comm, request3);
+    MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbor[UP], 89, cart_comm, request3);
 
   }
   if(coords[1] != dims[1] - 1)
@@ -448,13 +448,13 @@ int main(int argc, char **argv)
     double *down_row_hv = (double *)malloc(px * sizeof(double));
     for(int j = 0; j < px; j++)
     {
-      down_row_hv[j] = GET(&h_v, py - 1,  j);
+      down_row_hv[i] = GET(h_v, py - 1,  j);
     }
 
     MPI_Request *request4;
 
 
-    MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbors[DOWN], 89, cart_comm, request4);
+    MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbor[DOWN], 89, cart_comm, request4);
 
   }
   
