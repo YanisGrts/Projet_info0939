@@ -503,7 +503,7 @@ int main(int argc, char **argv)
 
     for(int i = 1; i < px; i++) 
     {
-      for(int j = 1; j < py; j++) 
+      for(int j = 1; j < py; j++)
       {
         //If we are in one border, there is one more 
         double hui1j = coords[0] == 0 ? GET(&h_u, i + 1, j)  : GET(&h_u, i, j);
@@ -521,7 +521,7 @@ int main(int argc, char **argv)
     // Verifier que tout a bien été reçu
 
     for(int i = 0; i < px; i++){
-      double hui1j = i == 0 && coords[0] == 0 ? GET(&h_u, 0, 0) : GET(&h_u, );//REFLECHIR
+      double hui1j = i == 0 && coords[0] == 0 ? GET(&h_u, 0, 0) : GET(&h_u, );//REFLECHIR 
       double huij = coords[0] == 0 ? GET(&h_u, i, 0) : left_col_hu[i];
       double hvij1 = coords[1] == 0 ? GET(&h_v, i, 1) : GET(&h_v, i, 0);
       double hvij = coords[1] == 0 ? GET(&h_u, i, 0) : up_col_hv[0];
