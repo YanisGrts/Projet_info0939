@@ -308,6 +308,8 @@ int main(int argc, char **argv)
   int reorder = 0;
 
   int coords[2];
+  // coords[0] est le nombre de ligne 
+  // coords[1] est le nombre de colonne
 
   int neighbors[4];
 
@@ -404,11 +406,10 @@ int main(int argc, char **argv)
 
 
 
-  //ici j'ai modifié les indices de boucles, on saute le premier car on aura besoin de ce qui a été send
-  //par contre si on est au process en 0, 0, là il faudra gérer ce cas
-  for(int i = 1; i < px ; i++) 
+  
+  for(int i = 0; i < px ; i++) 
   {
-    for(int j = 1; j < py; j++) 
+    for(int j = 0; j < py; j++) 
     {
       double x = i * param.dx;
       double y = j * param.dy;
@@ -431,41 +432,9 @@ int main(int argc, char **argv)
 
 
     double* left_col_hu; 
-    // MPI_Request *request1;
     
     MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request1);
-    // num_requests++;
-
-    //boucle sur toute la colonne de gauche
-
-    // for(int y = 0; y < py; y++)
-    // {
-    //   int y1;
-    //   int x1;
-      
-    //   if(y >= py -1)
-    //   { 
-    //     y1 = py-1;
-    //     y = py-2;
-    //   }
-    //   else
-    //   {
-    //     y1 = y + 1;
-    //   }
-
-    //   double h00 = left_col_hu[y];
-    //   double h01 = left_col_hu[y1]; 
-    //   double h10 = GET(&h_u, 0, y);
-    //   double h11 = GET(&h_u, 0, y1);
-
-    //   double val = (h00 * (i1 * data->dx - x) * (j1 * data->dx - y) + 
-    //       h01 * (i1 * data->dx - x) * (y - j * data->dx) + 
-    //       h10 * (x - i * data->dx) * (j1 * data->dx - y) + 
-    //       h11 * (x - i * data->dx) * (y - j * data->dx)) /(data->dx * data->dy);
-
-      
-    // }
-
+    
   }
   if(coords[0] != dims[0] - 1)
   {
@@ -478,18 +447,15 @@ int main(int argc, char **argv)
       right_col_hu[i] = GET(&h_u, i, px -1);
     }
 
-    // MPI_Request *request2;
+    
     MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request2);
-    // num_requests++;
+    
   }
   if(coords[1] != 0)
   {
-    // Appeler la méthode qui le reçoit
   
     double* up_row_hv; 
-    // MPI_Request *request3;
     MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request3);
-    // num_requests++;
 
   }
   if(coords[1] != dims[1] - 1)
@@ -502,163 +468,232 @@ int main(int argc, char **argv)
       down_row_hv[j] = GET(&h_v, py - 1,  j);
     }
 
-    // MPI_Request *request4;
-
-
     MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request4);
-    // num_requests++;
 
   }
+
+  MPI_Wait(&request1, MPI_STATUS_IGNORE);
+  MPI_Wait(&request2, MPI_STATUS_IGNORE);
+  MPI_Wait(&request3, MPI_STATUS_IGNORE);
+  MPI_Wait(&request4, MPI_STATUS_IGNORE);
+  
   
 
- 
+  // boucle temporelle
+  for(int n = 0; n < nt; n++) 
+  {
 
-  // MPI_Request requests[] = {request1, request2, request3, request4};
-  // MPI_Status statuses[4];
-  // MPI_Waitall(num_requests, requests, statuses);
+    if(n && (n % (nt / 10)) == 0) 
+    {
+      double time_sofar = GET_TIME() - start;
+      double eta = (nt - n) * time_sofar / n;
+      printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
+      fflush(stdout);
+    }
 
-  // if( rank == 0)
-  //   printf("After waitall\n");
+    // output solution
+    if(param.sampling_rate && !(n % param.sampling_rate)) {
+      write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
+      //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
+      //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
+    }
+
+    // impose boundary conditions
+    double t = n * param.dt;
+    if(param.source_type == 1) {
+      // sinusoidal velocity on top boundary
+      double A = 5;
+      double f = 1. / 20.;
+      for(int i = 0; i < px; i++) 
+      {
+        for(int j = 0; j < py; j++) 
+        {
+          SET(&u, 0, j, 0.);
+          SET(&u, px, j, 0.);
+          SET(&v, i, 0, 0.);
+          SET(&v, i, py, A * sin(2 * M_PI * f * t));
+        }
+      }
+    }
+    else if(param.source_type == 2) 
+    {
+      // sinusoidal elevation in the middle of the domain
+      double A = 5;
+      double f = 1. / 20.;
+      SET(&eta, px / 2, py / 2, A * sin(2 * M_PI * f * t));
+    }
+    else 
+    {
+      // TODO: add other sources
+      printf("Error: Unknown source type %d\n", param.source_type);
+      exit(0);
+    }
+
+    // update eta
+
+
+    MPI_Request request5, request6, request7, request8;
+    
+    if(coords[0] != 0)
+    {
+      double* left_col_u; 
+      MPI_Irecv(left_col_u, u.ny, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request5);
+      // Appeler la méthode qui le reçoit
+    }
+    if(coords[0] != dims[0] - 1)
+    {
+      //Send the last col of u
+
+      double *right_col_u = (double *)malloc(u.ny * sizeof(double));
+      for(int i = 0; i < u.ny; i++)
+      {
+        right_col_u[i] = GET(&u, i, u.nx -1);
+      }
+
+      MPI_Isend(right_col_u, u.ny, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request6);
+
+
+    }
+    if(coords[1] != 0)
+    {
+      double* up_row_v; 
+      MPI_Irecv(up_row_v, v.nx, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request7);
+    }
+    if(coords[1] != dims[1] - 1)
+    {
+      //Send the last row of v
+      double *down_row_v = (double *)malloc(v.nx * sizeof(double));
+
+      for(int i = 0; i < v.nx; i++)
+      {
+        down_row_v[i] = GET(&v, v.ny -1, i);
+      }
+
+      MPI_Isend(down_row_v, v.nx, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request8);
+    }
+
+    for(int i = 1; i < px; i++) 
+    {
+      for(int j = 1; j < py; j++) 
+      {
+        //If we are in one border, there is one more 
+        double hui1j = coords[0] == 0 ? GET(&h_u, i + 1, j)  : GET(&h_u, i, j);
+        double huij = coords[0] == 0 ? GET(&h_u, i, j)  : GET(&h_u, i-1, j);
+        double hvij1 = coords[1] == 0 ? GET(&h_v, i, j - 1)  : GET(&h_v, i, j);
+        double hvij = coords[1] == 0 ? GET(&h_v, i, j)  : GET(&h_v, i, j-1);
+        
+        
+        double eta_ij = GET(&eta, i, j)
+          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+        SET(&eta, i, j, eta_ij);
+      }
+    }
+    // Verifier que tout a bien été reçu
+
+    
+    MPI_Wait(&request5, MPI_STATUS_IGNORE);
+    MPI_Wait(&request6, MPI_STATUS_IGNORE);
+    MPI_Wait(&request7, MPI_STATUS_IGNORE);
+    MPI_Wait(&request8, MPI_STATUS_IGNORE);
+
+    for(int i = 0; i < px; i++){
+      double hui1j = i == 0 && coords[0] == 0 ? GET(&h_u, 0, 0) : GET(&h_u, );//REFLECHIR
+      double huij = coords[0] == 0 ? GET(&h_u, i, 0) : left_col_hu[i];
+      double hvij1 = coords[1] == 0 ? GET(&h_v, i, 1) : GET(&h_v, i, 0);
+      double hvij = coords[1] == 0 ? GET(&h_u, i, 0) : up_col_hv[0];
+      
+      double eta_ij = GET(&eta, i, 0)
+        - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+        - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+      SET(&eta, i, 0, eta_ij);
+    }
+    if(coords[1] != 0){
+      for(int i = 0; i < px; i++){
+        double hui1j = GET(&h_u, 0, i);
+        double huij = i == 0 ? left_col_hu[0] : GET(&h_u, i, j);
+        double hvij1 = GET(&h_v, 0, i + 1);
+        double hvij = up_col_hv[0]
+        
+        double eta_ij = GET(&eta, i, 0)
+          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
+          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+        SET(&eta, 0, i, eta_ij);
+      }
+    }
+
+
+
+    // update u and v
+
+    MPI_Request request9, request10, request11, request12;
+    
+    if(coords[0] != 0)
+    {
+      double* left_col_eta; 
+      MPI_Irecv(left_col_eta, eta.ny, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request9);
+      // Appeler la méthode qui le reçoit
+    }
+    if(coords[0] != dims[0] - 1)
+    {
+      //Send the last col of u
+
+      double *right_col_eta = (double *)malloc(eta.ny * sizeof(double));
+      for(int i = 0; i < eta.ny; i++)
+      {
+        right_col_eta[i] = GET(&eta, i, eta.nx -1);
+      }
+
+      MPI_Isend(right_col_eta, eta.ny, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request10);
+
+
+    }
+    if(coords[1] != 0)
+    {
+      double* up_row_eta; 
+      MPI_Irecv(up_row_eta, eta.nx, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request11);
+    }
+    if(coords[1] != dims[1] - 1)
+    {
+      //Send the last row of v
+      double *down_row_eta = (double *)malloc(eta.nx * sizeof(double));
+
+      for(int i = 0; i < eta.nx; i++)
+      {
+        down_row_eta[i] = GET(&v, eta.ny -1, i);
+      }
+
+      MPI_Isend(down_row_eta, eta.nx, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request12);
+    }
+
+    // il va falloir séparer en 2 pour le cas avec u et v puisqu'ils ne font pas la même taille. Ce sera plus simple
+
+    for(int i = 0; i < nx; i++) 
+    {
+      for(int j = 0; j < ny; j++) 
+      {
+        double c1 = param.dt * param.g;
+        double c2 = param.dt * param.gamma;
+        double eta_ij = GET(&eta, i, j);
+        double eta_imj = GET(&eta, (i == 0) ? 0 : i - 1, j);
+        double eta_ijm = GET(&eta, i, (j == 0) ? 0 : j - 1);
+        double u_ij = (1. - c2) * GET(&u, i, j)
+          - c1 / param.dx * (eta_ij - eta_imj);
+        double v_ij = (1. - c2) * GET(&v, i, j)
+          - c1 / param.dy * (eta_ij - eta_ijm);
+        SET(&u, i, j, u_ij);
+        SET(&v, i, j, v_ij);
+      }
+    }
+
+    MPI_Wait(&request9, MPI_STATUS_IGNORE);
+    MPI_Wait(&request10, MPI_STATUS_IGNORE);
+    MPI_Wait(&request11, MPI_STATUS_IGNORE);
+    MPI_Wait(&request12, MPI_STATUS_IGNORE);
+
+  }
 
   MPI_Finalize();
-
-  // boucle temporelle
-  // for(int n = 0; n < nt; n++) 
-  // {
-
-  //   if(n && (n % (nt / 10)) == 0) 
-  //   {
-  //     double time_sofar = GET_TIME() - start;
-  //     double eta = (nt - n) * time_sofar / n;
-  //     printf("Computing step %d/%d (ETA: %g seconds)     \r", n, nt, eta);
-  //     fflush(stdout);
-  //   }
-
-  //   // output solution
-  //   if(param.sampling_rate && !(n % param.sampling_rate)) {
-  //     write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-  //     //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-  //     //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
-  //   }
-
-  //   // impose boundary conditions
-  //   double t = n * param.dt;
-  //   if(param.source_type == 1) {
-  //     // sinusoidal velocity on top boundary
-  //     double A = 5;
-  //     double f = 1. / 20.;
-  //     for(int i = 0; i < px; i++) 
-  //     {
-  //       for(int j = 0; j < py; j++) 
-  //       {
-  //         SET(&u, 0, j, 0.);
-  //         SET(&u, px, j, 0.);
-  //         SET(&v, i, 0, 0.);
-  //         SET(&v, i, py, A * sin(2 * M_PI * f * t));
-  //       }
-  //     }
-  //   }
-  //   else if(param.source_type == 2) 
-  //   {
-  //     // sinusoidal elevation in the middle of the domain
-  //     double A = 5;
-  //     double f = 1. / 20.;
-  //     SET(&eta, px / 2, py / 2, A * sin(2 * M_PI * f * t));
-  //   }
-  //   else 
-  //   {
-  //     // TODO: add other sources
-  //     printf("Error: Unknown source type %d\n", param.source_type);
-  //     exit(0);
-  //   }
-
-  //   // update eta
-    
-  //   if(coords[0] != 0){
-  //     double* left_col_u; 
-  //     // Appeler la méthode qui le reçoit
-  //   }
-  //   if(coords[0] != dims[0] - 1){
-  //     //Send the last col of u
-  //   }
-  //   if(coords[1] != 0){
-  //     double* up_row_v; 
-  //     // Appeler la méthode qui le reçoit
-  //   }
-  //   if(coords[1] != dims[1] - 1){
-  //     //Send the last row of v
-  //   }
-
-  //   for(int i = 1; i < px; i++) 
-  //   {
-  //     for(int j = 1; j < py; j++) 
-  //     {
-  //       //If we are in one border, there is one more 
-  //       double hui1j = coords[0] == 0 ? GET(&h_u, i + 1, j)  : GET(&h_u, i, j);
-  //       double huij = coords[0] == 0 ? GET(&h_u, i, j)  : GET(&h_u, i-1, j);
-  //       double hvij1 = coords[1] == 0 ? GET(&h_v, i, j - 1)  : GET(&h_v, i, j);
-  //       double hvij = coords[1] == 0 ? GET(&h_v, i, j)  : GET(&h_v, i, j-1);
-        
-        
-  //       double eta_ij = GET(&eta, i, j)
-  //         - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-  //         - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
-  //       SET(&eta, i, j, eta_ij);
-  //     }
-  //   }
-  //   // Verifier que tout a bien été reçu
-
-  //   for(int i = 0; i < px; i++){
-  //     double hui1j = i == 0 && coords[0] == 0 ? GET(&h_u, 0, 0) : GET(&h_u, );//REFLECHIR
-  //     double huij = coords[0] == 0 ? GET(&h_u, i, 0) : left_col_hu[i];
-  //     double hvij1 = coords[1] == 0 ? GET(&h_v, i, 1) : GET(&h_v, i, 0);
-  //     double hvij = coords[1] == 0 ? GET(&h_u, i, 0) : up_col_hv[0];
-      
-  //     double eta_ij = GET(&eta, i, 0)
-  //       - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-  //       - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
-  //     SET(&eta, i, 0, eta_ij);
-  //   }
-  //   if(coords[1] != 0){
-  //     for(int i = 0; i < px; i++){
-  //       double hui1j = GET(&h_u, 0, i);
-  //       double huij = i == 0 ? left_col_hu[0] : GET(&h_u, i, j);
-  //       double hvij1 = GET(&h_v, 0, i + 1);
-  //       double hvij = up_col_hv[0]
-        
-  //       double eta_ij = GET(&eta, i, 0)
-  //         - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-  //         - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
-  //       SET(&eta, 0, i, eta_ij);
-  //     }
-  //   }
-
-
-
-
-  //   // update u and v
-
-  //   // il va falloir séparer en 2 pour le cas avec u et v puisqu'ils ne font pas la même taille. Ce sera plus simple
-
-  //   for(int i = 0; i < nx; i++) 
-  //   {
-  //     for(int j = 0; j < ny; j++) 
-  //     {
-  //       double c1 = param.dt * param.g;
-  //       double c2 = param.dt * param.gamma;
-  //       double eta_ij = GET(&eta, i, j);
-  //       double eta_imj = GET(&eta, (i == 0) ? 0 : i - 1, j);
-  //       double eta_ijm = GET(&eta, i, (j == 0) ? 0 : j - 1);
-  //       double u_ij = (1. - c2) * GET(&u, i, j)
-  //         - c1 / param.dx * (eta_ij - eta_imj);
-  //       double v_ij = (1. - c2) * GET(&v, i, j)
-  //         - c1 / param.dy * (eta_ij - eta_ijm);
-  //       SET(&u, i, j, u_ij);
-  //       SET(&v, i, j, v_ij);
-  //     }
-  //   }
-
-  // }
 
   write_manifest_vtk("water elevation", param.output_eta_filename,
                      param.dt, nt, param.sampling_rate);
