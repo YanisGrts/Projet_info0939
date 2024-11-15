@@ -268,7 +268,8 @@ double interpolate_data(const struct data *data, double x, double y)
     i1 = data->nx - 1;
     i = data-> nx - 2;
   }
-  else{
+  else
+  {
     i1 = i + 1; 
   }
   if(j < 0) j = 0;
@@ -351,16 +352,21 @@ int main(int argc, char **argv)
   // le nombre de noeuds que en fonction des arguments de l'exécution
   int nx = floor(hx / param.dx);
   int ny = floor(hy / param.dy);
-  printf("nx : %d, ny: %d\n", nx, ny);
+  
   if(nx <= 0) nx = 1;
   if(ny <= 0) ny = 1;
 
   // le nombre de pas de temps
   int nt = floor(param.max_t / param.dt);
 
-  printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
-         hx, hy, nx, ny, nx * ny);
-  printf(" - number of time steps: %d\n", nt);
+  if(rank == 0)
+  {
+    printf(" - grid size: %g m x %g m (%d x %d = %d grid points)\n",
+          hx, hy, nx, ny, nx * ny);
+    printf(" - number of time steps: %d\n", nt);
+    printf("nx : %d, ny: %d\n", nx, ny);
+    print_parameters(&param);
+  }
 
 
   // px = taille selon x du process
@@ -374,7 +380,7 @@ int main(int argc, char **argv)
   endpy = coords[1] == dims[1] - 1 ? ny - 1: startpy + py - 1;
   px = endpx - startpx + 1;
   py = endpy - startpy + 1;
-  printf("Process %d out of %d, position : %d, %d, interval : [%d, %d]*[%d, %d]\n", rank, world_size, coords[0], coords[1], startpx, endpx, startpy, endpy);
+  // printf("Process %d out of %d, position : %d, %d, interval : [%d, %d]*[%d, %d]\n", rank, world_size, coords[0], coords[1], startpx, endpx, startpy, endpy);
   //tu crées 3 nouvelles structure data
   struct data eta, u, v;
   init_data(&eta, px, py, param.dx, param.dx, 0.);
@@ -388,53 +394,94 @@ int main(int argc, char **argv)
   struct data h_u;
   struct data h_v;
   init_data(&h_interp, px, py, param.dx, param.dy, 0.);
-  init_data(&h_u, coords[0] == 0 ? px + 1 : px, py, param.dx, param.dy, 0.);
-  init_data(&h_v, px, coords[1] == 0 ? py + 1 : py, param.dx, param.dy, 0.);
+  init_data(&h_u, coord[0] == 0 ? px+1:px , py, param.dx, param.dy, 0.);
+  init_data(&h_v, px, coord[0] == 0 ? py + 1 : py, param.dx, param.dy, 0.);
 
 
  
-  // fprintf(stderr, "1\n");
 
   double start = GET_TIME();
-  for(int i = 0; i <= px; i++) {
-    for(int j = 0; j <= py; j++) {
+
+
+
+  //ici j'ai modifié les indices de boucles, on saute le premier car on aura besoin de ce qui a été send
+  //par contre si on est au process en 0, 0, là il faudra gérer ce cas
+
+  // PQ ??? on a pas besoin de recevoir quoi que ce soit  Y
+  for(int i = 0; i < h_u.nx ; i++) 
+  {
+    for(int j = 0; j < h_v.ny; j++) 
+    {
       double x = i * param.dx;
       double y = j * param.dy;
       //ici on interpole à partir de h (donc la bathymétric map pas précise)
-      if(i != px && j != py){
-        double val = interpolate_data(&h, startpx + x, startpy + y);
-        SET(&h_interp, i, j, val);
-      }
-      //Check the if conditions
-      if(i != px && coords[1] == 0){
-        val = interpolate_data(&h, startpx + x, startpy + y + param.dy / 2);
-        SET(&h_v, i, j, val);
-      }
-      if(j != py && coords[0] == 0){
-        val = interpolate_data(&h, startpx + x + param.dx / 2, startpy + y);
-        SET(&h_u, i, j, val);
-      }
-      
+      double val = interpolate_data(&h, startpx + x, startpy + y);
+      SET(&h_interp, i, j, val);
+      val = interpolate_data(&h, startpx + x + param.dx / 2, startpy + y);
+      SET(&h_u, i, j, val);
+      val = interpolate_data(&h, startpx + x, startpy + y + param.dy / 2);
+      SET(&h_v, i, j, val); 
     }
   }
-  // fprintf(stderr, "2\n");
-  if(coords[0] != 0){
+
+  MPI_Request request1, request2, request3, request4;
+  int num_requests = 0;
+
+  if(coords[0] != 0)
+  {
+    // Appeler la méthode qui le reçoit
+
+
     double* left_col_hu; 
-    // Appeler la méthode qui le reçoit
+    
+    MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request1);
+    
   }
-  if(coords[0] != dims[0] - 1){
+  if(coords[0] != dims[0] - 1)
+  {
     //Send the last col of hu to NEIGHBORS[RIGHT]
+
+    double *right_col_hu = (double *)malloc(py * sizeof(double)); //au lieu de faire une copie, essayé de directement encoyé l'adresse de la colonne
+
+    for(int i = 0; i < py; i++)
+    {
+      right_col_hu[i] = GET(&h_u, i, px -1);
+    }
+
+    
+    MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request2);
+    
   }
-  if(coords[1] != 0){
+  if(coords[1] != 0)
+  {
+  
     double* up_row_hv; 
-    // Appeler la méthode qui le reçoit
+    MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request3);
+
   }
-  if(coords[1] != dims[1] - 1){
+  if(coords[1] != dims[1] - 1)
+  {
     //Send the last row of hv to NEIGHBOR[LEFT]
+
+    double *down_row_hv = (double *)malloc(px * sizeof(double));
+    for(int j = 0; j < px; j++)
+    {
+      down_row_hv[j] = GET(&h_v, py - 1,  j);
+    }
+
+    MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request4);
+
   }
+
+  MPI_Wait(&request1, MPI_STATUS_IGNORE);
+  MPI_Wait(&request2, MPI_STATUS_IGNORE);
+  MPI_Wait(&request3, MPI_STATUS_IGNORE);
+  MPI_Wait(&request4, MPI_STATUS_IGNORE);
   
 
-  //boucle temporelle
+
+
+  // boucle temporelle
   for(int n = 0; n < nt; n++) 
   {
 
@@ -448,9 +495,10 @@ int main(int argc, char **argv)
 
     // output solution
     if(param.sampling_rate && !(n % param.sampling_rate)) {
+      //LA BOITE
       write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-      //write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-      //write_data_vtk(&v, "y velocity", param.output_v_filename, n);
+      write_data_vtk(&u, "x velocity", param.output_u_filename, n);
+      write_data_vtk(&v, "y velocity", param.output_v_filename, n);
     }
 
     // impose boundary conditions
@@ -459,9 +507,9 @@ int main(int argc, char **argv)
       // sinusoidal velocity on top boundary
       double A = 5;
       double f = 1. / 20.;
-      for(int i = 0; i < px; i++) 
+      for(int i = 0; i < h_u.nx; i++) 
       {
-        for(int j = 0; j < py; j++) 
+        for(int j = 0; j < h_v.ny; j++) 
         {
           SET(&u, 0, j, 0.);
           SET(&u, px, j, 0.);
@@ -484,72 +532,153 @@ int main(int argc, char **argv)
       exit(0);
     }
 
-    // update eta
+
+    // Exchanging the last col and row of u and v on the grid
+    MPI_Request request5, request6, request7, request8;
     
-    if(coords[0] != 0){
+    if(coords[0] != 0)
+    {
       double* left_col_u; 
-      // Appeler la méthode qui le reçoit
+      MPI_Irecv(left_col_u, u.ny, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request5);
     }
-    if(coords[0] != dims[0] - 1){
+    if(coords[0] != dims[0] - 1)
+    {
       //Send the last col of u
+
+      double *right_col_u = (double *)malloc(u.ny * sizeof(double));
+      for(int i = 0; i < u.ny; i++)
+      {
+        right_col_u[i] = GET(&u, i, u.nx -1);
+      }
+
+      MPI_Isend(right_col_u, u.ny, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request6);
+
+
     }
-    if(coords[1] != 0){
+    if(coords[1] != 0)
+    {
       double* up_row_v; 
-      // Appeler la méthode qui le reçoit
+      MPI_Irecv(up_row_v, v.nx, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request7);
     }
-    if(coords[1] != dims[1] - 1){
+    if(coords[1] != dims[1] - 1)
+    {
       //Send the last row of v
+      double *down_row_v = (double *)malloc(v.nx * sizeof(double));
+
+      for(int i = 0; i < v.nx; i++)
+      {
+        down_row_v[i] = GET(&v, v.ny -1, i);
+      }
+
+      MPI_Isend(down_row_v, v.nx, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request8);
     }
 
-    for(int i = 1; i < px; i++) 
+
+    // update eta
+    for(int i = 1; i < eta.nx; i++) 
     {
-      for(int j = 1; j < py; j++)
+      for(int j = 1; j < eta.ny; j++) 
       {
         //If we are in one border, there is one more 
-        double hui1j = coords[0] == 0 ? GET(&h_u, i + 1, j)  : GET(&h_u, i, j);
-        double huij = coords[0] == 0 ? GET(&h_u, i, j)  : GET(&h_u, i-1, j);
-        double hvij1 = coords[1] == 0 ? GET(&h_v, i, j - 1)  : GET(&h_v, i, j);
-        double hvij = coords[1] == 0 ? GET(&h_v, i, j)  : GET(&h_v, i, j-1);
+        double hui1j = GET(&h_u, coords[0]==0?i+1:i, j);
+        double huij = GET(&h_u, coords[0]==0?i:i-1, j);
+        double hvij1 = GET(&h_v, i, coords[0]==0?j+1:j);
+        double hvij = GET(&h_v, i, coords[0]==0?j:j-1);
         
         
         double eta_ij = GET(&eta, i, j)
-          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
+          - param.dt / param.dx * (hui1j * GET(&u, coords[0]==0?i+1:i, j) - huij * GET(&u, coords[0]==0?i:i-1, j))
+          - param.dt / param.dy * (hvij1 * GET(&v, i,coords[0]==0?j+1:j) - hvij * GET(&v, i, coords[0]==0?j:j-1));
         SET(&eta, i, j, eta_ij);
       }
     }
-    // Verifier que tout a bien été reçu
-
-    for(int i = 0; i < px; i++){
-      double hui1j = i == 0 && coords[0] == 0 ? GET(&h_u, 0, 0) : GET(&h_u, );//REFLECHIR 
-      double huij = coords[0] == 0 ? GET(&h_u, i, 0) : left_col_hu[i];
-      double hvij1 = coords[1] == 0 ? GET(&h_v, i, 1) : GET(&h_v, i, 0);
-      double hvij = coords[1] == 0 ? GET(&h_u, i, 0) : up_col_hv[0];
+    // wait for everything to be received
+    if(coord[0]!= 0)
+      MPI_Wait(&request5, MPI_STATUS_IGNORE);
+    if(coord[1]!=0)
+      MPI_Wait(&request7, MPI_STATUS_IGNORE);
+    //Handling the upper left 
+    double hui1j = GET(&h_u, coords[0]==0?1:0, 0);
+    double huij = coords[0]==0?GET(&h_u, 0, 0):left_col_u[0];
+    double hvij1 = GET(&h_v, 0, coords[1]==0?1:0)
+    double hvij = coords[1]==0?GET(&h_v, 0, 0):up_row_v[0];
+    
+    
+    double eta_ij = GET(&eta, i, j)
+      - param.dt / param.dx * (hui1j * GET(&u, coords[0]==0?i+1:i, j) - huij * GET(&u, coords[0]==0?i:i-1, j))
+      - param.dt / param.dy * (hvij1 * GET(&v, i,coords[0]==0?j+1:j) - hvij * GET(&v, i, coords[0]==0?j:j-1));
+    SET(&eta, i, j, eta_ij);
+    
+    //Handling the first row along y
+    for(int i = 1; i < eta.nx; i++){
+      double hui1j = GET(&h_u, coords[0]==0?i+1:i, 0);
+      double huij = GET(&h_u, coords[0]==0?i:i-1, 0);
+      double hvij1 = GET(&h_v, i, coords[1]==0?1:0)
+      double hvij = coords[1]==0?GET(&h_v, i, 0):up_row_v[i];
       
-      double eta_ij = GET(&eta, i, 0)
-        - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-        - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
-      SET(&eta, i, 0, eta_ij);
+      
+      double eta_ij = GET(&eta, i, j)
+        - param.dt / param.dx * (hui1j * GET(&u, coords[0]==0?i+1:i, j) - huij * GET(&u, coords[0]==0?i:i-1, j))
+        - param.dt / param.dy * (hvij1 * GET(&v, i,coords[0]==0?j+1:j) - hvij * GET(&v, i, coords[0]==0?j:j-1));
+      SET(&eta, i, j, eta_ij);
     }
-    if(coords[1] != 0){
-      for(int i = 0; i < px; i++){
-        double hui1j = GET(&h_u, 0, i);
-        double huij = i == 0 ? left_col_hu[0] : GET(&h_u, i, j);
-        double hvij1 = GET(&h_v, 0, i + 1);
-        double hvij = up_col_hv[0]
-        
-        double eta_ij = GET(&eta, i, 0)
-          - param.dt / param.dx * (hui1j * GET(&u, i + 1, j) - huij * GET(&u, i, j))
-          - param.dt / param.dy * (hvij1 * GET(&v, i, j + 1) - hvij * GET(&v, i, j));
-        SET(&eta, 0, i, eta_ij);
+
+    // Handling the first col along x
+    for(int j = 1; j < eta.nx; j++){
+      double hui1j = GET(&h_u, coords[0]==0?1:0, j);
+      double huij = coords[0]==0?GET(&h_u, 0, j):left_col_u[j];
+      double hvij1 = GET(&h_v, 0, coords[1]==0?j+1:j)
+      double hvij = GET(&h_v, 0, coords[1]==0?j:j-1);
+      
+      
+      double eta_ij = GET(&eta, i, j)
+        - param.dt / param.dx * (hui1j * GET(&u, coords[0]==0?i+1:i, j) - huij * GET(&u, coords[0]==0?i:i-1, j))
+        - param.dt / param.dy * (hvij1 * GET(&v, i,coords[0]==0?j+1:j) - hvij * GET(&v, i, coords[0]==0?j:j-1));
+      SET(&eta, i, j, eta_ij);
+    }
+
+    
+    // Send eta
+    MPI_Request request9, request10, request11, request12;
+    if(coords[0] != 0)
+    {
+      double* left_col_eta; 
+      MPI_Irecv(left_col_eta, eta.ny, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request9);
+      // Appeler la méthode qui le reçoit
+    }
+    if(coords[0] != dims[0] - 1)
+    {
+      //Send the last col of u
+
+      double *right_col_eta = (double *)malloc(eta.ny * sizeof(double));
+      for(int i = 0; i < eta.ny; i++)
+      {
+        right_col_eta[i] = GET(&eta, i, eta.nx -1);
       }
+
+      MPI_Isend(right_col_eta, eta.ny, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request10);
+
+
     }
+    if(coords[1] != 0)
+    {
+      double* up_row_eta; 
+      MPI_Irecv(up_row_eta, eta.nx, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request11);
+    }
+    if(coords[1] != dims[1] - 1)
+    {
+      //Send the last row of v
+      double *down_row_eta = (double *)malloc(eta.nx * sizeof(double));
 
+      for(int i = 0; i < eta.nx; i++)
+      {
+        down_row_eta[i] = GET(&v, eta.ny -1, i);
+      }
 
-
-
+      MPI_Isend(down_row_eta, eta.nx, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request12);
+    }
     // update u and v
-
+    
     // il va falloir séparer en 2 pour le cas avec u et v puisqu'ils ne font pas la même taille. Ce sera plus simple
 
     for(int i = 0; i < nx; i++) 
@@ -569,17 +698,21 @@ int main(int argc, char **argv)
         SET(&v, i, j, v_ij);
       }
     }
+    //WAIT eta 
+    if(coord[0]!= 0)
+      MPI_Wait(&request9, MPI_STATUS_IGNORE);
+    if(coord[1]!=0)
+      MPI_Wait(&request11, MPI_STATUS_IGNORE);
+
 
   }
-
   MPI_Finalize();
-
   write_manifest_vtk("water elevation", param.output_eta_filename,
                      param.dt, nt, param.sampling_rate);
-  //write_manifest_vtk("x velocity", param.output_u_filename,
-  //                   param.dt, nt, param.sampling_rate);
-  //write_manifest_vtk("y velocity", param.output_v_filename,
-  //                   param.dt, nt, param.sampling_rate);
+  write_manifest_vtk("x velocity", param.output_u_filename,
+                    param.dt, nt, param.sampling_rate);
+  write_manifest_vtk("y velocity", param.output_v_filename,
+                    param.dt, nt, param.sampling_rate);
 
   double time = GET_TIME() - start;
   printf("\nDone: %g seconds (%g MUpdates/s)\n", time,
