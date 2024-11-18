@@ -308,6 +308,8 @@ int main(int argc, char **argv)
   int reorder = 0;
 
   int coords[2];
+  // coords[0] est le nombre de ligne 
+  // coords[1] est le nombre de colonne
 
   int neighbors[4];
 
@@ -406,7 +408,7 @@ int main(int argc, char **argv)
 
   //ici j'ai modifié les indices de boucles, on saute le premier car on aura besoin de ce qui a été send
   //par contre si on est au process en 0, 0, là il faudra gérer ce cas
-
+  
   // PQ ??? on a pas besoin de recevoir quoi que ce soit  Y
   for(int i = 0; i < h_u.nx ; i++) 
   {
@@ -478,8 +480,7 @@ int main(int argc, char **argv)
   MPI_Wait(&request3, MPI_STATUS_IGNORE);
   MPI_Wait(&request4, MPI_STATUS_IGNORE);
   
-
-
+  
 
   // boucle temporelle
   for(int n = 0; n < nt; n++) 
@@ -495,7 +496,6 @@ int main(int argc, char **argv)
 
     // output solution
     if(param.sampling_rate && !(n % param.sampling_rate)) {
-      //LA BOITE
       write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
       write_data_vtk(&u, "x velocity", param.output_u_filename, n);
       write_data_vtk(&v, "y velocity", param.output_v_filename, n);
@@ -531,6 +531,8 @@ int main(int argc, char **argv)
       printf("Error: Unknown source type %d\n", param.source_type);
       exit(0);
     }
+
+    // update eta
 
 
     // Exchanging the last col and row of u and v on the grid
@@ -594,9 +596,9 @@ int main(int argc, char **argv)
     }
     // wait for everything to be received
     if(coord[0]!= 0)
-      MPI_Wait(&request5, MPI_STATUS_IGNORE);
+    MPI_Wait(&request5, MPI_STATUS_IGNORE);
     if(coord[1]!=0)
-      MPI_Wait(&request7, MPI_STATUS_IGNORE);
+    MPI_Wait(&request7, MPI_STATUS_IGNORE);
     //Handling the upper left 
     double hui1j = GET(&h_u, coords[0]==0?1:0, 0);
     double huij = coords[0]==0?GET(&h_u, 0, 0):left_col_u[0];
@@ -630,16 +632,19 @@ int main(int argc, char **argv)
       double hvij1 = GET(&h_v, 0, coords[1]==0?j+1:j)
       double hvij = GET(&h_v, 0, coords[1]==0?j:j-1);
       
-      
+        
       double eta_ij = GET(&eta, i, j)
         - param.dt / param.dx * (hui1j * GET(&u, coords[0]==0?i+1:i, j) - huij * GET(&u, coords[0]==0?i:i-1, j))
         - param.dt / param.dy * (hvij1 * GET(&v, i,coords[0]==0?j+1:j) - hvij * GET(&v, i, coords[0]==0?j:j-1));
       SET(&eta, i, j, eta_ij);
     }
-
     
+
+
+
     // Send eta
     MPI_Request request9, request10, request11, request12;
+    
     if(coords[0] != 0)
     {
       double* left_col_eta; 
@@ -678,7 +683,7 @@ int main(int argc, char **argv)
       MPI_Isend(down_row_eta, eta.nx, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request12);
     }
     // update u and v
-    
+
     // il va falloir séparer en 2 pour le cas avec u et v puisqu'ils ne font pas la même taille. Ce sera plus simple
 
     for(int i = 0; i < nx; i++) 
@@ -700,13 +705,15 @@ int main(int argc, char **argv)
     }
     //WAIT eta 
     if(coord[0]!= 0)
-      MPI_Wait(&request9, MPI_STATUS_IGNORE);
+    MPI_Wait(&request9, MPI_STATUS_IGNORE);
     if(coord[1]!=0)
-      MPI_Wait(&request11, MPI_STATUS_IGNORE);
+    MPI_Wait(&request11, MPI_STATUS_IGNORE);
 
 
   }
+
   MPI_Finalize();
+
   write_manifest_vtk("water elevation", param.output_eta_filename,
                      param.dt, nt, param.sampling_rate);
   write_manifest_vtk("x velocity", param.output_u_filename,
