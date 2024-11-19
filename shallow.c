@@ -424,58 +424,42 @@ int main(int argc, char **argv)
 
   MPI_Request request1, request2, request3, request4;
   int num_requests = 0;
-
-  if(coords[0] != 0)
-  {
-    // Appeler la méthode qui le reçoit
-
-
-    double* left_col_hu; 
-    
-    MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request1);
-    
-  }
+  double* left_col_hu;
+  double* up_row_hv; 
+  
   if(coords[0] != dims[0] - 1)
   {
-    //Send the last col of hu to NEIGHBORS[RIGHT]
-
-    double *right_col_hu = (double *)malloc(py * sizeof(double)); //au lieu de faire une copie, essayé de directement encoyé l'adresse de la colonne
-
-    for(int i = 0; i < py; i++)
-    {
-      right_col_hu[i] = GET(&h_u, i, px -1);
-    }
-
-    
-    MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request2);
-    
-  }
-  if(coords[1] != 0)
-  {
-  
-    double* up_row_hv; 
-    MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request3);
-
-  }
-  if(coords[1] != dims[1] - 1)
-  {
-    //Send the last row of hv to NEIGHBOR[LEFT]
-
     double *down_row_hv = (double *)malloc(px * sizeof(double));
     for(int j = 0; j < px; j++)
-    {
       down_row_hv[j] = GET(&h_v, py - 1,  j);
-    }
-
-    MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request4);
-
+    MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbors[DOWN], 98, cart_comm, &request4);
   }
+  
+  if(coords[1] != dims[1] - 1)
+  {
+    double *right_col_hu = (double *)malloc(py * sizeof(double));
+    for(int i = 0; i < py; i++)
+      right_col_hu[i] = GET(&h_u, i, px -1);
+    MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbors[RIGHT], 99, cart_comm, &request2);
+    
+  }
+  
+  if(coords[1] != 0)
+    MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbors[LEFT], 99, cart_comm, &request1);
+  if(coords[0] != 0)
+    MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbors[UP], 98, cart_comm, &request3);
+  fprintf(stderr, "2\n\n");
 
-  MPI_Wait(&request1, MPI_STATUS_IGNORE);
-  MPI_Wait(&request2, MPI_STATUS_IGNORE);
-  MPI_Wait(&request3, MPI_STATUS_IGNORE);
-  MPI_Wait(&request4, MPI_STATUS_IGNORE);
 
+  if(coords[0]!=0)
+    MPI_Wait(&request3, MPI_STATUS_IGNORE);
+  if(coords[1] != dims[1] - 1)
+    MPI_Wait(&request2, MPI_STATUS_IGNORE);
+  if(coords[1]!=0)
+    MPI_Wait(&request1, MPI_STATUS_IGNORE);
+  if(coords[0] != dims[0] - 1)
+    MPI_Wait(&request4, MPI_STATUS_IGNORE);
+  fprintf(stderr, "3\n\n"); 
   double* up_row_v;
   double* left_col_u;
   double* left_col_eta;  
