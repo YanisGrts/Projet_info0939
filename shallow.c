@@ -367,8 +367,11 @@ int main(int argc, char **argv)
           hx, hy, nx, ny, nx * ny);
     printf(" - number of time steps: %d\n", nt);
     printf("nx : %d, ny: %d\n", nx, ny);
+    printf("Dim[0] = %d, Dim[1] = %d\n", dims[0], dims[1]);
     print_parameters(&param);
   }
+
+  fprintf(stderr, "After print parameters %d\n", rank);
 
 
   // px = taille selon x du process
@@ -399,13 +402,13 @@ int main(int argc, char **argv)
   init_data(&h_u, coords[0] == 0 ? px+1:px , py, param.dx, param.dy, 0.);
   init_data(&h_v, px, coords[0] == 0 ? py + 1 : py, param.dx, param.dy, 0.);
 
-
+  
  
   double start = GET_TIME();
-  //ici j'ai modifié les indices de boucles, on saute le premier car on aura besoin de ce qui a été send
-  //par contre si on est au process en 0, 0, là il faudra gérer ce cas
-  
+
   // PQ ??? on a pas besoin de recevoir quoi que ce soit  Y
+
+  fprintf(stderr, "before interpolate data %d\n", rank);
   for(int i = 0; i < h_u.nx ; i++) 
   {
     for(int j = 0; j < h_v.ny; j++) 
@@ -425,61 +428,64 @@ int main(int argc, char **argv)
   MPI_Request request1, request2, request3, request4;
   int num_requests = 0;
 
-  if(coords[0] != 0)
-  {
-    // Appeler la méthode qui le reçoit
+  fprintf(stderr, "After interpolate data %d\n", rank);
 
-
-    double* left_col_hu; 
-    
-    MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request1);
-    
-  }
-  if(coords[0] != dims[0] - 1)
-  {
-    //Send the last col of hu to NEIGHBORS[RIGHT]
-
-    double *right_col_hu = (double *)malloc(py * sizeof(double)); //au lieu de faire une copie, essayé de directement encoyé l'adresse de la colonne
-
-    for(int i = 0; i < py; i++)
-    {
-      right_col_hu[i] = GET(&h_u, i, px -1);
-    }
-
-    
-    MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request2);
-    
-  }
-  if(coords[1] != 0)
-  {
+ 
   
-    double* up_row_hv; 
-    MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request3);
 
-  }
-  if(coords[1] != dims[1] - 1)
+  //recevoir la left col
+  double* left_col_hu; 
+  int neighbor_left = coords[0] > 0 ? neighbors[LEFT] : MPI_PROC_NULL;
+  MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbor_left, 99, cart_comm, &request1);
+  
+  
+  
+  //Send the last col of hu to NEIGHBORS[RIGHT]
+
+  double *right_col_hu = (double *)malloc(py * sizeof(double)); //au lieu de faire une copie, essayé de directement encoyé l'adresse de la colonne
+  for(int i = 0; i < py; i++)
   {
-    //Send the last row of hv to NEIGHBOR[LEFT]
+    right_col_hu[i] = GET(&h_u, i, px -1);
+  }
+  int neighbor_right = coords[0] < dims[0] - 1 ? neighbors[RIGHT] : MPI_PROC_NULL;
+  MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbor_right, 99, cart_comm, &request2);
+    
+  
+  
+  //recevoir la ligne du dessus
+  double* up_row_hv; 
+  int neighbor_up = coords[1] > 0 ? neighbors[UP] : MPI_PROC_NULL; 
+  MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbor_up, 99, cart_comm, &request3);
 
-    double *down_row_hv = (double *)malloc(px * sizeof(double));
-    for(int j = 0; j < px; j++)
-    {
-      down_row_hv[j] = GET(&h_v, py - 1,  j);
-    }
+  
 
-    MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request4);
-
+  double *down_row_hv = (double *)malloc(px * sizeof(double));
+  for(int j = 0; j < px; j++)
+  {
+    down_row_hv[j] = GET(&h_v, py - 1,  j);
   }
 
-  MPI_Wait(&request1, MPI_STATUS_IGNORE);
-  MPI_Wait(&request2, MPI_STATUS_IGNORE);
-  MPI_Wait(&request3, MPI_STATUS_IGNORE);
-  MPI_Wait(&request4, MPI_STATUS_IGNORE);
+  int neighbor_down = coords[1] < dims[1] -1 ? neighbors[DOWN] : MPI_PROC_NULL;
+  MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbor_down, 99, cart_comm, &request4);
+
+
+
+  fprintf(stderr, "before MPI WAIT %d\n", rank);
+  
+  if(coords[0] != 0 || coords[1] != 0)
+  {
+    MPI_Wait(&request1, MPI_STATUS_IGNORE);
+    // MPI_Wait(&request2, MPI_STATUS_IGNORE);
+    MPI_Wait(&request3, MPI_STATUS_IGNORE);
+    // MPI_Wait(&request4, MPI_STATUS_IGNORE);
+  }
 
   double* up_row_v;
   double* left_col_u;
   double* left_col_eta;  
   double* up_row_eta; 
+
+  fprintf(stderr, "before boucle temporelle %d\n", rank);
   // boucle temporelle
   for(int n = 0; n < nt; n++) 
   {
@@ -493,11 +499,11 @@ int main(int argc, char **argv)
     }
 
     // output solution
-    if(param.sampling_rate && !(n % param.sampling_rate)) {
-      write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
-      write_data_vtk(&u, "x velocity", param.output_u_filename, n);
-      write_data_vtk(&v, "y velocity", param.output_v_filename, n);
-    }
+    // if(param.sampling_rate && !(n % param.sampling_rate)) {
+    //   write_data_vtk(&eta, "water elevation", param.output_eta_filename, n);
+    //   write_data_vtk(&u, "x velocity", param.output_u_filename, n);
+    //   write_data_vtk(&v, "y velocity", param.output_v_filename, n);
+    // }
 
     // impose boundary conditions
     double t = n * param.dt;
@@ -536,7 +542,7 @@ int main(int argc, char **argv)
     if(coords[0] != 0)
     {
       
-      MPI_Irecv(left_col_u, u.ny, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request5);
+      MPI_Irecv(left_col_u, u.ny, MPI_DOUBLE, neighbors[LEFT], 99, cart_comm, &request5);
     }
     if(coords[0] != dims[0] - 1)
     {
@@ -548,14 +554,14 @@ int main(int argc, char **argv)
         right_col_u[i] = GET(&u, i, u.nx -1);
       }
 
-      MPI_Isend(right_col_u, u.ny, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request6);
+      MPI_Isend(right_col_u, u.ny, MPI_DOUBLE, neighbors[RIGHT], 99, cart_comm, &request6);
 
 
     }
     if(coords[1] != 0)
     {
        
-      MPI_Irecv(up_row_v, v.nx, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request7);
+      MPI_Irecv(up_row_v, v.nx, MPI_DOUBLE, neighbors[UP], 99, cart_comm, &request7);
     }
     if(coords[1] != dims[1] - 1)
     {
@@ -567,7 +573,7 @@ int main(int argc, char **argv)
         down_row_v[i] = GET(&v, v.ny -1, i);
       }
 
-      MPI_Isend(down_row_v, v.nx, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request8);
+      MPI_Isend(down_row_v, v.nx, MPI_DOUBLE, neighbors[DOWN], 99, cart_comm, &request8);
     }
 
 
@@ -639,7 +645,7 @@ int main(int argc, char **argv)
     if(coords[0] != 0)
     {
       
-      MPI_Irecv(left_col_eta, eta.ny, MPI_DOUBLE, neighbors[LEFT], neighbors[LEFT], cart_comm, &request9);
+      MPI_Irecv(left_col_eta, eta.ny, MPI_DOUBLE, neighbors[LEFT], 99, cart_comm, &request9);
       // Appeler la méthode qui le reçoit
     }
     if(coords[0] != dims[0] - 1)
@@ -652,14 +658,14 @@ int main(int argc, char **argv)
         right_col_eta[i] = GET(&eta, i, eta.nx -1);
       }
 
-      MPI_Isend(right_col_eta, eta.ny, MPI_DOUBLE, neighbors[RIGHT], rank, cart_comm, &request10);
+      MPI_Isend(right_col_eta, eta.ny, MPI_DOUBLE, neighbors[RIGHT], 99, cart_comm, &request10);
 
 
     }
     if(coords[1] != 0)
     {
       
-      MPI_Irecv(up_row_eta, eta.nx, MPI_DOUBLE, neighbors[UP], neighbors[UP], cart_comm, &request11);
+      MPI_Irecv(up_row_eta, eta.nx, MPI_DOUBLE, neighbors[UP], 99, cart_comm, &request11);
     }
     if(coords[1] != dims[1] - 1)
     {
@@ -671,7 +677,7 @@ int main(int argc, char **argv)
         down_row_eta[i] = GET(&v, eta.ny -1, i);
       }
 
-      MPI_Isend(down_row_eta, eta.nx, MPI_DOUBLE, neighbors[DOWN], rank, cart_comm, &request12);
+      MPI_Isend(down_row_eta, eta.nx, MPI_DOUBLE, neighbors[DOWN], 99, cart_comm, &request12);
     }
     // update u and v
 
@@ -725,18 +731,19 @@ int main(int argc, char **argv)
     }
   }
 
-  MPI_Finalize();
 
-  write_manifest_vtk("water elevation", param.output_eta_filename,
-                     param.dt, nt, param.sampling_rate);
-  write_manifest_vtk("x velocity", param.output_u_filename,
-                    param.dt, nt, param.sampling_rate);
-  write_manifest_vtk("y velocity", param.output_v_filename,
-                    param.dt, nt, param.sampling_rate);
+  // write_manifest_vtk("water elevation", param.output_eta_filename,
+  //                    param.dt, nt, param.sampling_rate);
+  // write_manifest_vtk("x velocity", param.output_u_filename,
+  //                   param.dt, nt, param.sampling_rate);
+  // write_manifest_vtk("y velocity", param.output_v_filename,
+  //                   param.dt, nt, param.sampling_rate);
 
   double time = GET_TIME() - start;
   printf("\nDone: %g seconds (%g MUpdates/s)\n", time,
          1e-6 * (double)eta.nx * (double)eta.ny * (double)nt / time);
+
+
 
 
   free_data(&h_interp);
@@ -745,6 +752,9 @@ int main(int argc, char **argv)
   free_data(&eta);
   free_data(&u);
   free_data(&v);
+
+  MPI_Finalize();
+
 
   return 0;
 }
