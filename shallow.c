@@ -434,7 +434,7 @@ int main(int argc, char **argv)
   
 
   //recevoir la left col
-  double* left_col_hu; 
+  double* left_col_hu = (double *)malloc(h_u.ny * sizeof(double)); 
   int neighbor_left = coords[0] > 0 ? neighbors[LEFT] : MPI_PROC_NULL;
   MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbor_left, 99, cart_comm, &request1);
   
@@ -442,7 +442,7 @@ int main(int argc, char **argv)
   
   //Send the last col of hu to NEIGHBORS[RIGHT]
 
-  double *right_col_hu = (double *)malloc(py * sizeof(double)); //au lieu de faire une copie, essayé de directement encoyé l'adresse de la colonne
+  double *right_col_hu = (double *)malloc(h_u.ny * sizeof(double)); //au lieu de faire une copie, essayé de directement encoyé l'adresse de la colonne
   for(int i = 0; i < py; i++)
   {
     right_col_hu[i] = GET(&h_u, i, px -1);
@@ -453,13 +453,13 @@ int main(int argc, char **argv)
   
   
   //recevoir la ligne du dessus
-  double* up_row_hv; 
+  double* up_row_hv = (double *)malloc(h_v.nx * sizeof(double)); 
   int neighbor_up = coords[1] > 0 ? neighbors[UP] : MPI_PROC_NULL; 
   MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbor_up, 99, cart_comm, &request3);
 
   
 
-  double *down_row_hv = (double *)malloc(px * sizeof(double));
+  double *down_row_hv = (double *)malloc(h_v.nx * sizeof(double));
   for(int j = 0; j < px; j++)
   {
     down_row_hv[j] = GET(&h_v, py - 1,  j);
@@ -472,13 +472,12 @@ int main(int argc, char **argv)
 
   fprintf(stderr, "before MPI WAIT %d\n", rank);
   
-  if(coords[0] != 0 || coords[1] != 0)
-  {
-    MPI_Wait(&request1, MPI_STATUS_IGNORE);
-    // MPI_Wait(&request2, MPI_STATUS_IGNORE);
-    MPI_Wait(&request3, MPI_STATUS_IGNORE);
-    // MPI_Wait(&request4, MPI_STATUS_IGNORE);
-  }
+  
+  MPI_Wait(&request1, MPI_STATUS_IGNORE);
+  // MPI_Wait(&request2, MPI_STATUS_IGNORE);
+  MPI_Wait(&request3, MPI_STATUS_IGNORE);
+  // MPI_Wait(&request4, MPI_STATUS_IGNORE);
+ 
 
   double* up_row_v;
   double* left_col_u;
@@ -730,6 +729,8 @@ int main(int argc, char **argv)
       SET(&v, i, 0, v_ij);
     }
   }
+
+  fprintf(stderr, "after boucle temporelle %d\n", rank);
 
 
   // write_manifest_vtk("water elevation", param.output_eta_filename,
