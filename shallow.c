@@ -299,7 +299,8 @@ int main(int argc, char **argv)
   }
 
    //calcule des dimensions adaptés aux différents process
-
+  int r = 3;
+  int all = 1; 
   int world_size;
   int rank, cart_rank;
 
@@ -394,11 +395,11 @@ int main(int argc, char **argv)
 
   // interpolate bathymetry
   //les h interp c'est les h plus précis que la bathymétric map
-  struct data h_interp;
+  //struct data h_interp;
   // h_u et h_v c'est la hauteur aux endroits où on évalue la vitesse
   struct data h_u;
   struct data h_v;
-  init_data(&h_interp, px, py, param.dx, param.dy, 0.);
+  //init_data(&h_interp, px, py, param.dx, param.dy, 0.);
   init_data(&h_u, coords[0] == 0 ? px+1:px , py, param.dx, param.dy, 0.);
   init_data(&h_v, px, coords[0] == 0 ? py + 1 : py, param.dx, param.dy, 0.);
 
@@ -407,8 +408,8 @@ int main(int argc, char **argv)
   double start = GET_TIME();
 
   // PQ ??? on a pas besoin de recevoir quoi que ce soit  Y
-
-  fprintf(stderr, "before interpolate data %d\n", rank);
+  if(rank == r || all)
+    fprintf(stderr, "before interpolate data %d\n", rank);
   for(int i = 0; i < h_u.nx ; i++) 
   {
     for(int j = 0; j < h_v.ny; j++) 
@@ -417,7 +418,7 @@ int main(int argc, char **argv)
       double y = j * param.dy;
       //ici on interpole à partir de h (donc la bathymétric map pas précise)
       double val = interpolate_data(&h, startpx + x, startpy + y);
-      SET(&h_interp, i, j, val);
+      //SET(&h_interp, i, j, val);
       val = interpolate_data(&h, startpx + x + param.dx / 2, startpy + y);
       SET(&h_u, i, j, val);
       val = interpolate_data(&h, startpx + x, startpy + y + param.dy / 2);
@@ -427,58 +428,73 @@ int main(int argc, char **argv)
 
   MPI_Request request1, request2, request3, request4;
   int num_requests = 0;
-
-  fprintf(stderr, "After interpolate data %d\n", rank);
-
+  if(rank == r|| all)
+    fprintf(stderr, "After interpolate data %d\n", rank);
  
-  
+  int neighbor_right = coords[1] < dims[1] - 1 ? neighbors[RIGHT] : MPI_PROC_NULL;
+  int neighbor_left = coords[1] > 0 ? neighbors[LEFT] : MPI_PROC_NULL;
+  int neighbor_up = coords[0] > 0 ? neighbors[UP] : MPI_PROC_NULL; 
+  int neighbor_down = coords[0] < dims[0]-1 ? neighbors[DOWN] : MPI_PROC_NULL;
+
 
   //recevoir la left col
   double* left_col_hu = (double *)malloc(h_u.ny * sizeof(double)); 
-  int neighbor_left = coords[0] > 0 ? neighbors[LEFT] : MPI_PROC_NULL;
-  MPI_Irecv(left_col_hu, py, MPI_DOUBLE, neighbor_left, 99, cart_comm, &request1);
+  
+  if((rank == r || all )&& coords[0] > 0){
+    fprintf(stderr, "size of the left col for rcv of rank%d : %d\n", rank, h_u.ny);
+    fflush(stderr);
+  }
+  MPI_Irecv(left_col_hu, h_u.ny, MPI_DOUBLE, neighbor_left, 99, cart_comm, &request1);
   
   
   
   //Send the last col of hu to NEIGHBORS[RIGHT]
 
   double *right_col_hu = (double *)malloc(h_u.ny * sizeof(double)); //au lieu de faire une copie, essayé de directement encoyé l'adresse de la colonne
-  for(int i = 0; i < py; i++)
+  for(int i = 0; i < h_u.ny; i++)
   {
     right_col_hu[i] = GET(&h_u, i, px -1);
   }
-  int neighbor_right = coords[0] < dims[0] - 1 ? neighbors[RIGHT] : MPI_PROC_NULL;
-  MPI_Isend(right_col_hu, py, MPI_DOUBLE, neighbor_right, 99, cart_comm, &request2);
+
+  if((r == rank || all) && coords[0] < dims[0]-1){
+    fprintf(stderr, "size of the left col for snd of rank %d : %d\n", rank, h_u.ny);
+    fflush(stderr);
+  }
+  MPI_Isend(right_col_hu, h_u.ny, MPI_DOUBLE, neighbor_right, 99, cart_comm, &request2);
     
   
   
   //recevoir la ligne du dessus
   double* up_row_hv = (double *)malloc(h_v.nx * sizeof(double)); 
-  int neighbor_up = coords[1] > 0 ? neighbors[UP] : MPI_PROC_NULL; 
-  MPI_Irecv(up_row_hv, px, MPI_DOUBLE, neighbor_up, 99, cart_comm, &request3);
+  MPI_Irecv(up_row_hv, h_v.nx, MPI_DOUBLE, neighbor_up, 99, cart_comm, &request3);
 
   
 
   double *down_row_hv = (double *)malloc(h_v.nx * sizeof(double));
-  for(int j = 0; j < px; j++)
+  for(int j = 0; j < h_v.nx; j++)
   {
     down_row_hv[j] = GET(&h_v, py - 1,  j);
   }
 
-  int neighbor_down = coords[1] < dims[1] -1 ? neighbors[DOWN] : MPI_PROC_NULL;
-  MPI_Isend(down_row_hv, px, MPI_DOUBLE, neighbor_down, 99, cart_comm, &request4);
+  MPI_Isend(down_row_hv, h_v.nx, MPI_DOUBLE, neighbor_down, 99, cart_comm, &request4);
 
 
-
-  fprintf(stderr, "before MPI WAIT %d\n", rank);
-  
-  
+  if(rank == r || all)
+  {
+    fprintf(stderr, "before MPI WAIT %d\n", rank);
+    fflush(stderr);
+  }
+ 
   MPI_Wait(&request1, MPI_STATUS_IGNORE);
   MPI_Wait(&request2, MPI_STATUS_IGNORE);
   MPI_Wait(&request3, MPI_STATUS_IGNORE);
   MPI_Wait(&request4, MPI_STATUS_IGNORE);
  
-
+if(rank == r || all)
+{
+  fprintf(stderr, "after MPI WAIT %d\n", rank);
+  fflush(stderr);
+}
   double* up_row_v = (double *)malloc(v.nx * sizeof(double));
   double *down_row_v = (double *)malloc(v.nx * sizeof(double));
 
@@ -491,13 +507,15 @@ int main(int argc, char **argv)
   double* up_row_eta = (double *)malloc(eta.nx * sizeof(double));
   double *down_row_eta = (double *)malloc(eta.nx * sizeof(double));
 
-  fprintf(stderr, "before boucle temporelle %d\n", rank);
+  if(rank == r || all)
+  {
+    fprintf(stderr, "before boucle temporelle %d\n", rank);
+    fflush(stderr);
+  }
+  
   // boucle temporelle
   for(int n = 0; n < nt; n++) 
   {
-
-
-
     if(n && (n % (nt / 10)) == 0) 
     {
       double time_sofar = GET_TIME() - start;
@@ -506,9 +524,10 @@ int main(int argc, char **argv)
       fflush(stdout);
     }
 
-    if(n == 0)
+    if((rank == r || all) &&n == 0)
     {
       fprintf(stderr, "après le premier if du premier pas de temps %d\n", rank);
+      fflush(stderr);
     }
 
     // output solution
@@ -551,10 +570,16 @@ int main(int argc, char **argv)
 
     // Exchanging the last col and row of u and v on the grid
     MPI_Request request5, request6, request7, request8;
-    
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 1\n");
+    //   fflush(stderr);
+    // }
    
     MPI_Irecv(left_col_u, u.ny, MPI_DOUBLE, neighbor_left, 99, cart_comm, &request5);
-    
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 2\n");
+    //   fflush(stderr);
+    // }
 
     
     for(int i = 0; i < u.ny; i++)
@@ -596,11 +621,20 @@ int main(int argc, char **argv)
         SET(&eta, i, j, eta_ij);
       }
     }
+
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 3\n");
+    //   fflush(stderr);
+    // }
+    
     // wait for everything to be received
-    if(coords[0]!= 0)
     MPI_Wait(&request5, MPI_STATUS_IGNORE);
-    if(coords[1]!=0)
     MPI_Wait(&request7, MPI_STATUS_IGNORE);
+
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 4\n");
+    //   fflush(stderr);
+    // }
     //Handling the upper left 
     double hui1j = GET(&h_u, coords[0]==0?1:0, 0);
     double huij = coords[0]==0?GET(&h_u, 0, 0):left_col_u[0];
@@ -641,6 +675,10 @@ int main(int argc, char **argv)
       SET(&eta, 0, j, eta_ij);
     }
     // Send eta
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 5\n");
+    //   fflush(stderr);
+    // }
     MPI_Request request9, request10, request11, request12;
     
     
@@ -659,7 +697,10 @@ int main(int argc, char **argv)
 
     
     MPI_Irecv(up_row_eta, eta.nx, MPI_DOUBLE, neighbor_up, 99, cart_comm, &request11);
-    
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 6\n");
+    //   fflush(stderr);
+    // }
    for(int i = 0; i < eta.nx; i++)
     {
       down_row_eta[i] = GET(&v, eta.ny -1, i);
@@ -692,11 +733,17 @@ int main(int argc, char **argv)
         }
       }
     }
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 7\n");
+    //   fflush(stderr);
+    // }
     //WAIT eta 
-    if(coords[0]!= 0)
-      MPI_Wait(&request9, MPI_STATUS_IGNORE);
-    if(coords[1]!=0)
-      MPI_Wait(&request11, MPI_STATUS_IGNORE);
+    MPI_Wait(&request9, MPI_STATUS_IGNORE);
+    MPI_Wait(&request11, MPI_STATUS_IGNORE);
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 8\n");
+    //   fflush(stderr);
+    // }
     for(int j = 0; j < u.ny; j++) 
     {
       double c1 = param.dt * param.g;
@@ -717,15 +764,21 @@ int main(int argc, char **argv)
         - c1 / param.dy * (eta_ij - eta_ijm);
       SET(&v, i, 0, v_ij);
     }
+    // if(rank == r){
+    //   fprintf(stderr,"gneh 9\n");
+    //   fflush(stderr);
+    // }
 
-
-    if(n == 0)
+    if((rank == r || all)&& n == 0)
     {
       fprintf(stderr, "Fin du premier pas de temps %d \n", rank);
+      fflush(stderr);
     }
   }
-
-  fprintf(stderr, "after boucle temporelle %d\n", rank);
+  if(rank == r || all){
+    fprintf(stderr, "after boucle temporelle %d\n", rank);
+    fflush(stderr);
+  }
 
 
   write_manifest_vtk("water elevation", param.output_eta_filename,
@@ -741,15 +794,24 @@ int main(int argc, char **argv)
 
 
 
-
-  free_data(&h_interp);
-  free_data(&h_u);
-  free_data(&h_v);
-  free_data(&eta);
-  free_data(&u);
-  free_data(&v);
-
-  MPI_Finalize();
+// fprintf(stderr, "2, %d\n", rank);
+// fflush(stderr);
+// free_data(&h_u);
+// fprintf(stderr, "3, %d\n", rank);
+// fflush(stderr);
+// free_data(&h_v);
+// fprintf(stderr, "4, %d\n", rank);
+// fflush(stderr);
+// free_data(&eta);
+// fprintf(stderr, "5, %d\n", rank);
+// fflush(stderr);
+// free_data(&u);
+// fprintf(stderr, "6, %d\n", rank);
+// fflush(stderr);
+// free_data(&v);
+// fprintf(stderr, "7, %d\n", rank);
+// fflush(stderr);
+MPI_Finalize();
 
 
   return 0;
